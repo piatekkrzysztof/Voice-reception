@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Konsola operacyjna recepcji AI i transakcyjnego systemu rezerwacji." />
+  <title>Voice Reception — konsola operacyjna</title>
+  <link rel="stylesheet" href="/styles.css?v=1" />
+  <script src="/app.js?v=1" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Przejdź do treści</a>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="wordmark" href="#operations" aria-label="Voice Reception — strona główna">
+        <span class="mark"><i></i><b></b></span>
+        <span><strong>VOICE</strong><small>RECEPTION / 01</small></span>
+      </a>
+
+      <nav aria-label="Nawigacja konsoli">
+        <a href="#operations"><span>01</span>Operacje</a>
+        <a href="#booking"><span>02</span>Rezerwacje</a>
+        <a href="#calls"><span>03</span>Rozmowy</a>
+        <a href="#deployment"><span>04</span>Wdrożenie</a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="environment"><i></i><span>ŚRODOWISKO</span><strong id="environment-label">LOKALNE</strong></div>
+        <div class="business-stamp"><span>PL</span><div><strong id="business-name">Ładowanie…</strong><small id="timezone-label">Europe/Warsaw</small></div></div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div><span>VOICE OPERATIONS</span><b>/</b><strong id="page-context">LIVE DESK</strong></div>
+        <div class="topbar-actions">
+          <span class="system-pulse"><i></i><span id="system-status">ŁĄCZENIE</span></span>
+          <button class="icon-button" id="refresh-button" type="button" aria-label="Odśwież dane">↻</button>
+          <time id="clock">--:--:--</time>
+        </div>
+      </header>
+
+      <main id="main">
+        <section class="hero" id="operations">
+          <div class="hero-copy">
+            <p class="eyebrow">RECEPCJA AI / PILOT OPERACYJNY</p>
+            <h1>Każda rozmowa<br /><em>kończy się wynikiem.</em></h1>
+            <p class="hero-lead">Terminy sprawdzane w kalendarzu, blokady odporne na konflikt i jednoznaczne przekazanie do człowieka.</p>
+          </div>
+          <div class="agent-orbit" aria-label="Status agenta">
+            <div class="orbit-ring"><span>AI</span></div>
+            <div><small id="agent-label">BOOKING SERVICE / PL</small><strong id="agent-state">TRYB LOKALNY</strong><p>Ujawnienie AI · transfer · rezerwacja</p></div>
+          </div>
+        </section>
+
+        <section class="integration-strip" id="integration-strip" aria-label="Stan integracji"></section>
+
+        <section class="metric-grid" id="metric-grid" aria-label="Główne metryki"></section>
+
+        <section class="desk-grid" id="booking">
+          <article class="panel booking-panel">
+            <header class="panel-head">
+              <div><p class="eyebrow">TRANSAKCYJNY BOOKING</p><h2>Próba operacyjna</h2></div>
+              <span>AVAILABILITY → HOLD → CONFIRM</span>
+            </header>
+
+            <div class="agent-script"><span>AI</span><p id="agent-greeting">Dzień dobry, tu automatyczna asystentka AI. Mogę pomóc umówić wizytę.</p></div>
+
+            <form class="availability-form" id="availability-form">
+              <label>Usługa<select id="service-select" name="service" required></select></label>
+              <label>Preferowany dzień<input id="preferred-date" name="preferredDate" type="date" required /></label>
+              <button class="primary-button" type="submit">Sprawdź terminy <span>→</span></button>
+            </form>
+
+            <div class="flow-stage" id="flow-stage">
+              <span class="stage-number">01</span>
+              <div><strong>Wybierz usługę i dzień</strong><p>Pokażemy wyłącznie terminy możliwe do bezpiecznego zablokowania.</p></div>
+            </div>
+          </article>
+
+          <aside class="panel readiness-panel" id="deployment">
+            <header class="panel-head compact"><div><p class="eyebrow">PILOT READINESS</p><h2>Połączenie z rynkiem</h2></div><strong id="readiness-score">0 / 4</strong></header>
+            <div class="readiness-list" id="readiness-list"></div>
+            <div class="webhook-box"><small>VAPI WEBHOOK</small><code id="webhook-url">—</code></div>
+          </aside>
+        </section>
+
+        <section class="panel data-panel" id="bookings">
+          <header class="panel-head">
+            <div><p class="eyebrow">BOOKING LEDGER</p><h2>Rejestr rezerwacji</h2></div>
+            <span id="booking-count">0 REKORDÓW</span>
+          </header>
+          <div class="empty-state" id="bookings-list"><span>00</span><p>Brak rezerwacji. Pierwsza potwierdzona wizyta pojawi się tutaj.</p></div>
+        </section>
+
+        <section class="panel data-panel" id="calls">
+          <header class="panel-head">
+            <div><p class="eyebrow">CALL JOURNAL</p><h2>Ostatnie rozmowy</h2></div>
+            <span id="disclosure-rate">AI DISCLOSURE 100%</span>
+          </header>
+          <div class="empty-state" id="calls-list"><span>00</span><p>Brak rozmów. Raport z pierwszego połączenia Vapi pojawi się tutaj.</p></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

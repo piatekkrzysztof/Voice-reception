@@ -1,0 +1,17 @@
+{
+  "name": "voice-reception",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Samodzielna recepcja AI z transakcyjnym Booking Service, Vapi i Cal.com.",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env --watch server.mjs",
+    "test": "node --test",
+    "reset": "node scripts/reset-local.mjs",
+    "voice:sync": "node --env-file-if-exists=.env scripts/sync-vapi-assistant.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
