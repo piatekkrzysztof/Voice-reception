@@ -1,7 +1,8 @@
 const state = {
   dashboard: null,
   hold: null,
-  loading: false
+  loading: false,
+  auth: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -15,12 +16,15 @@ function escapeHtml(value = '') {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    credentials: 'same-origin',
     headers: { 'content-type': 'application/json', ...(options.headers || {}) }
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.error?.message || `Błąd HTTP ${response.status}`);
     error.code = payload.error?.code;
+    error.status = response.status;
+    if (response.status === 401 && !path.startsWith('/api/auth/')) requireAuthentication();
     throw error;
   }
   return payload;
@@ -32,6 +36,115 @@ function showToast(message, type = 'success') {
   toast.className = `toast visible ${type === 'error' ? 'error' : ''}`;
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => { toast.className = 'toast'; }, 3600);
+}
+
+function showAuthError(selector, message = '') {
+  const element = $(selector);
+  element.textContent = message;
+  element.hidden = !message;
+}
+
+function requireAuthentication(mode = 'login', status = {}) {
+  state.auth = null;
+  state.dashboard = null;
+  document.body.classList.remove('auth-pending', 'auth-complete');
+  document.body.classList.add('auth-required');
+  $('#app-shell').setAttribute('aria-hidden', 'true');
+  $('#auth-loading').hidden = true;
+  $('#setup-form').hidden = mode !== 'setup';
+  $('#login-form').hidden = mode !== 'login';
+  $('#setup-token-field').hidden = !status.setupTokenRequired;
+  if (mode === 'login') $('#login-form [name="email"]').focus();
+  if (mode === 'setup') $('#setup-form [name="email"]').focus();
+}
+
+function openConsole(user) {
+  state.auth = user;
+  document.body.classList.remove('auth-pending', 'auth-required');
+  document.body.classList.add('auth-complete');
+  $('#app-shell').setAttribute('aria-hidden', 'false');
+  $('#operator-email').textContent = user.email;
+}
+
+async function finishAuthentication(result) {
+  showAuthError('#setup-error');
+  showAuthError('#login-error');
+  openConsole(result.user);
+  await loadDashboard({ quiet: true, force: true });
+}
+
+async function handleSetup(event) {
+  event.preventDefault();
+  if (state.loading) return;
+  const form = new FormData(event.currentTarget);
+  const password = String(form.get('password') || '');
+  if (password !== String(form.get('passwordConfirmation') || '')) {
+    showAuthError('#setup-error', 'Hasła nie są identyczne.');
+    return;
+  }
+  setLoading(true);
+  showAuthError('#setup-error');
+  try {
+    const result = await api('/api/auth/setup', {
+      method: 'POST',
+      body: JSON.stringify({ email: form.get('email'), password, setupToken: form.get('setupToken') })
+    });
+    await finishAuthentication(result);
+    showToast('Konto właściciela zostało utworzone. Konsola jest chroniona.');
+  } catch (error) {
+    showAuthError('#setup-error', error.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  if (state.loading) return;
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  setLoading(true);
+  showAuthError('#login-error');
+  try {
+    const result = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: form.get('email'), password: form.get('password') })
+    });
+    formElement.reset();
+    await finishAuthentication(result);
+    showToast('Bezpieczna sesja została otwarta.');
+  } catch (error) {
+    showAuthError('#login-error', error.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function logout() {
+  if (state.loading) return;
+  setLoading(true);
+  try {
+    await api('/api/auth/logout', { method: 'POST', body: '{}' });
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setLoading(false);
+    requireAuthentication('login');
+  }
+}
+
+async function bootAuthentication() {
+  try {
+    const status = await api('/api/auth/status');
+    if (status.authenticated) {
+      openConsole(status.user);
+      await loadDashboard({ quiet: true, force: true });
+      return;
+    }
+    requireAuthentication(status.setupRequired ? 'setup' : 'login', status);
+  } catch (error) {
+    $('#auth-loading').innerHTML = `<p>Nie udało się połączyć z serwerem.<br />${escapeHtml(error.message)}</p>`;
+  }
 }
 
 function setLoading(loading) {
@@ -286,6 +399,9 @@ document.addEventListener('click', (event) => {
 
 $('#availability-form').addEventListener('submit', checkAvailability);
 $('#refresh-button').addEventListener('click', () => loadDashboard());
+$('#setup-form').addEventListener('submit', handleSetup);
+$('#login-form').addEventListener('submit', handleLogin);
+$('#logout-button').addEventListener('click', logout);
 $('#preferred-date').min = tomorrow();
 $('#preferred-date').value = tomorrow();
 
@@ -293,4 +409,4 @@ setInterval(() => {
   $('#clock').textContent = new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
 }, 1000);
 
-loadDashboard({ quiet: true });
+bootAuthentication();

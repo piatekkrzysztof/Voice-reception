@@ -88,6 +88,26 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       detail TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS voice_admins (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner','admin')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS voice_sessions (
+      token_hash TEXT PRIMARY KEY,
+      admin_id TEXT NOT NULL REFERENCES voice_admins(id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS voice_sessions_expiry
+      ON voice_sessions(expires_at);
   `);
 
   const serviceRows = [
@@ -317,8 +337,59 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     return { ...calls, bookings };
   }
 
+  function adminCount() {
+    return Number(db.prepare('SELECT COUNT(*) AS count FROM voice_admins').get().count);
+  }
+
+  function createFirstAdmin({ email, passwordHash }) {
+    return transaction(() => {
+      if (adminCount() > 0) {
+        const error = new Error('Konfiguracja właściciela została już zakończona.');
+        error.status = 409;
+        error.code = 'AUTH_SETUP_COMPLETE';
+        throw error;
+      }
+      const now = new Date().toISOString();
+      const admin = { id: id('ADMIN'), email, role: 'owner', createdAt: now };
+      db.prepare(`INSERT INTO voice_admins (id, email, password_hash, role, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(admin.id, admin.email, passwordHash, admin.role, now, now);
+      return admin;
+    });
+  }
+
+  function findAdminByEmail(email) {
+    return db.prepare(`SELECT id, email, password_hash AS passwordHash, role,
+      created_at AS createdAt FROM voice_admins WHERE email = ? COLLATE NOCASE`).get(email) || null;
+  }
+
+  function createAdminSession({ tokenHash, adminId, expiresAt }) {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO voice_sessions (token_hash, admin_id, expires_at, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?)`)
+      .run(tokenHash, adminId, expiresAt, now, now);
+  }
+
+  function findAdminSession(tokenHash) {
+    const now = new Date().toISOString();
+    db.prepare('DELETE FROM voice_sessions WHERE expires_at <= ?').run(now);
+    const session = db.prepare(`SELECT s.token_hash AS tokenHash, s.expires_at AS expiresAt,
+      a.id AS adminId, a.email, a.role
+      FROM voice_sessions s JOIN voice_admins a ON a.id = s.admin_id
+      WHERE s.token_hash = ? AND s.expires_at > ?`).get(tokenHash, now);
+    if (!session) return null;
+    db.prepare('UPDATE voice_sessions SET last_seen_at = ? WHERE token_hash = ?').run(now, tokenHash);
+    return session;
+  }
+
+  function deleteAdminSession(tokenHash) {
+    return db.prepare('DELETE FROM voice_sessions WHERE token_hash = ?').run(tokenHash).changes;
+  }
+
   return {
+    kind: 'sqlite',
     close: () => db.close(),
+    health: () => Boolean(db.prepare('SELECT 1 AS ok').get().ok),
     listServices,
     configureEventTypes,
     slotIsFree,
@@ -335,6 +406,12 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     recordEvent,
     stats,
     expireHolds,
+    adminCount,
+    createFirstAdmin,
+    findAdminByEmail,
+    createAdminSession,
+    findAdminSession,
+    deleteAdminSession,
     raw: db
   };
 }

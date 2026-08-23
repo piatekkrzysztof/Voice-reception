@@ -8,6 +8,7 @@ import { createApp } from '../server.mjs';
 let app;
 let baseUrl;
 let temporaryDirectory;
+let sessionCookie;
 
 before(async () => {
   temporaryDirectory = await mkdtemp(join(tmpdir(), 'voice-reception-test-'));
@@ -24,17 +25,28 @@ before(async () => {
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${app.server.address().port}`;
+  const setupResponse = await fetch(`${baseUrl}/api/auth/setup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' })
+  });
+  assert.equal(setupResponse.status, 201);
+  sessionCookie = setupResponse.headers.get('set-cookie').split(';')[0];
 });
 
 after(async () => {
-  await new Promise((resolve, reject) => app.server.close((error) => error ? reject(error) : resolve()));
+  await app.close();
   await rm(temporaryDirectory, { recursive: true, force: true });
 });
 
-async function request(path, options = {}) {
+async function request(path, options = {}, authenticated = true) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
-    headers: { 'content-type': 'application/json', ...(options.headers || {}) }
+    headers: {
+      'content-type': 'application/json',
+      ...(authenticated && sessionCookie ? { cookie: sessionCookie } : {}),
+      ...(options.headers || {})
+    }
   });
   return { response, body: await response.json() };
 }
@@ -44,6 +56,71 @@ test('health endpoint identyfikuje samodzielny produkt Voice Reception', async (
   assert.equal(response.status, 200);
   assert.equal(body.status, 'ok');
   assert.equal(body.service, 'voice-reception');
+});
+
+test('readiness potwierdza dostęp do aktywnej bazy danych', async () => {
+  const { response, body } = await request('/api/ready');
+  assert.equal(response.status, 200);
+  assert.equal(body.status, 'ready');
+  assert.equal(body.database, 'sqlite');
+});
+
+test('konsola i dane klientów wymagają zalogowanej sesji', async () => {
+  const unauthenticated = await request('/api/voice', {}, false);
+  assert.equal(unauthenticated.response.status, 401);
+  assert.equal(unauthenticated.body.error.code, 'AUTH_REQUIRED');
+
+  const authenticated = await request('/api/auth/status');
+  assert.equal(authenticated.body.authenticated, true);
+  assert.equal(authenticated.body.user.email, 'owner@voice.test');
+});
+
+test('pierwsza konfiguracja jest jednorazowa, a hasło nie trafia do bazy', async () => {
+  const repeatedSetup = await request('/api/auth/setup', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'second@voice.test', password: 'Another-Strong-Password!' })
+  }, false);
+  assert.equal(repeatedSetup.response.status, 409);
+  assert.equal(repeatedSetup.body.error.code, 'AUTH_SETUP_COMPLETE');
+
+  const admin = await app.voiceService.database.findAdminByEmail('owner@voice.test');
+  assert.match(admin.passwordHash, /^scrypt\$/);
+  assert.equal(admin.passwordHash.includes('Correct-Horse-2030!'), false);
+});
+
+test('logowanie wydaje sesję HttpOnly, a limit prób blokuje brute force', async () => {
+  const login = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' })
+  }, false);
+  assert.equal(login.response.status, 200);
+  assert.match(login.response.headers.get('set-cookie'), /HttpOnly/);
+  assert.match(login.response.headers.get('set-cookie'), /SameSite=Strict/);
+
+  for (let index = 0; index < 5; index += 1) {
+    const failed = await request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' })
+    }, false);
+    assert.equal(failed.response.status, 401);
+  }
+  const limited = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' })
+  }, false);
+  assert.equal(limited.response.status, 429);
+  assert.equal(limited.body.error.code, 'AUTH_RATE_LIMITED');
+  assert.ok(Number(limited.response.headers.get('retry-after')) > 0);
+});
+
+test('operacje zmieniające dane odrzucają obce źródło', async () => {
+  const rejected = await request('/api/voice/availability', {
+    method: 'POST',
+    headers: { origin: 'https://evil.example' },
+    body: JSON.stringify({ service: 'svc-coloring', preferredDate: '2030-01-02' })
+  });
+  assert.equal(rejected.response.status, 403);
+  assert.equal(rejected.body.error.code, 'AUTH_ORIGIN_REJECTED');
 });
 
 test('booking korzysta z podpisanego slotu, holdu i idempotentnego potwierdzenia', async () => {
@@ -76,7 +153,7 @@ test('booking korzysta z podpisanego slotu, holdu i idempotentnego potwierdzenia
   assert.equal(first.response.status, 201);
   assert.equal(repeated.response.status, 200);
   assert.equal(first.body.booking.id, repeated.body.booking.id);
-  assert.equal(app.voiceService.database.listBookings('voice-test-tenant').length, 1);
+  assert.equal((await app.voiceService.database.listBookings('voice-test-tenant')).length, 1);
 });
 
 test('Vapi Tool Gateway zwraca wymagany kontrakt result', async () => {
@@ -131,7 +208,7 @@ test('webhook Vapi wymaga sekretu i zapisuje wyłącznie raport końcowy', async
     })
   });
   assert.equal(report.response.status, 200);
-  const saved = app.voiceService.dashboard().calls.find((call) => call.externalId === 'vapi-call-finished-1');
+  const saved = (await app.voiceService.dashboard()).calls.find((call) => call.externalId === 'vapi-call-finished-1');
   assert.equal(saved.durationSeconds, 120);
   assert.equal(saved.outcome, 'RESOLVED');
 });

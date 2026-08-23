@@ -5,12 +5,56 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Konsola operacyjna recepcji AI i transakcyjnego systemu rezerwacji." />
   <title>Voice Reception — konsola operacyjna</title>
-  <link rel="stylesheet" href="/styles.css?v=1" />
-  <script src="/app.js?v=1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=2" />
+  <script src="/app.js?v=2" type="module"></script>
 </head>
-<body>
+<body class="auth-pending">
   <a class="skip-link" href="#main">Przejdź do treści</a>
-  <div class="app-shell">
+  <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title">
+    <div class="auth-brand-panel">
+      <a class="auth-wordmark" href="/" aria-label="Voice Reception">
+        <span class="mark"><i></i><b></b></span>
+        <span><strong>VOICE</strong><small>RECEPTION / SECURE DESK</small></span>
+      </a>
+      <div class="auth-statement">
+        <p class="eyebrow">PRYWATNA KONSOLA OPERACYJNA</p>
+        <h1 id="auth-title">Rozmowy.<br /><em>Rezerwacje.</em><br />Pełna kontrola.</h1>
+        <p>Dane klientów, historia połączeń i operacje na kalendarzu są dostępne wyłącznie po uwierzytelnieniu.</p>
+      </div>
+      <div class="auth-assurance"><span>01</span><p><strong>SESJA HTTPONLY</strong><small>Hasło scrypt · ochrona żądań · limit prób</small></p></div>
+    </div>
+
+    <div class="auth-form-panel">
+      <div class="auth-loading" id="auth-loading">
+        <span class="auth-loader" aria-hidden="true"></span>
+        <p>Weryfikacja dostępu…</p>
+      </div>
+
+      <form class="auth-form" id="setup-form" hidden>
+        <div class="auth-step"><span>PIERWSZE URUCHOMIENIE</span><b>01 / 01</b></div>
+        <h2>Utwórz konto właściciela</h2>
+        <p>To konto będzie miało dostęp do danych rozmów i rezerwacji. Nie tworzymy domyślnego hasła.</p>
+        <label>Adres e-mail<input name="email" type="email" autocomplete="username" required /></label>
+        <label>Hasło<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required /><small>Minimum 12 znaków. Użyj unikalnego hasła.</small></label>
+        <label>Powtórz hasło<input name="passwordConfirmation" type="password" minlength="12" maxlength="256" autocomplete="new-password" required /></label>
+        <label id="setup-token-field" hidden>Token pierwszej konfiguracji<input name="setupToken" type="password" autocomplete="off" /><small>Wymagany przy konfiguracji przez publiczny adres.</small></label>
+        <p class="auth-error" id="setup-error" role="alert" hidden></p>
+        <button class="primary-button auth-submit" type="submit">Utwórz bezpieczną konsolę <span>→</span></button>
+      </form>
+
+      <form class="auth-form" id="login-form" hidden>
+        <div class="auth-step"><span>DOSTĘP OPERATORA</span><b>SECURE</b></div>
+        <h2>Zaloguj się do konsoli</h2>
+        <p>Sesja wygaśnie automatycznie. Kolejne nieudane próby logowania są ograniczane.</p>
+        <label>Adres e-mail<input name="email" type="email" autocomplete="username" required /></label>
+        <label>Hasło<input name="password" type="password" maxlength="256" autocomplete="current-password" required /></label>
+        <p class="auth-error" id="login-error" role="alert" hidden></p>
+        <button class="primary-button auth-submit" type="submit">Otwórz konsolę <span>→</span></button>
+      </form>
+    </div>
+  </section>
+
+  <div class="app-shell" id="app-shell" aria-hidden="true">
     <aside class="sidebar">
       <a class="wordmark" href="#operations" aria-label="Voice Reception — strona główna">
         <span class="mark"><i></i><b></b></span>
@@ -34,8 +78,10 @@
       <header class="topbar">
         <div><span>VOICE OPERATIONS</span><b>/</b><strong id="page-context">LIVE DESK</strong></div>
         <div class="topbar-actions">
+          <span class="operator-badge" id="operator-email">—</span>
           <span class="system-pulse"><i></i><span id="system-status">ŁĄCZENIE</span></span>
           <button class="icon-button" id="refresh-button" type="button" aria-label="Odśwież dane">↻</button>
+          <button class="logout-button" id="logout-button" type="button">WYLOGUJ</button>
           <time id="clock">--:--:--</time>
         </div>
       </header>

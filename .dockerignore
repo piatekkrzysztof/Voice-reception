@@ -1,0 +1,15 @@
+.git
+.gitignore
+.idea
+.env
+.env.*
+!.env.example
+!.env.production.example
+.npm-cache
+data
+docs
+node_modules
+test
+*.log
+Dockerfile*
+compose*.yaml

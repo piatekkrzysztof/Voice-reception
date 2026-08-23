@@ -1,0 +1,93 @@
+name: voice-reception
+
+services:
+  edge:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Ustaw domenę wskazującą na serwer}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: voice_reception
+      POSTGRES_USER: voice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Ustaw POSTGRES_PASSWORD w .env.production}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voice -d voice_reception"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      database:
+        condition: service_healthy
+    expose:
+      - "4173"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4173
+      PUBLIC_BASE_URL: https://${PUBLIC_DOMAIN:?Ustaw domenę wskazującą na serwer}
+      DATABASE_URL: postgresql://voice:${POSTGRES_PASSWORD}@database:5432/voice_reception
+      DATABASE_SSL_MODE: disable
+      VOICE_TENANT_ID: ${VOICE_TENANT_ID:-atelier-polnoc}
+      VOICE_BUSINESS_NAME: ${VOICE_BUSINESS_NAME:-Atelier Północ}
+      VOICE_LOCALE: ${VOICE_LOCALE:-pl-PL}
+      VOICE_TIMEZONE: ${VOICE_TIMEZONE:-Europe/Warsaw}
+      VOICE_HOLD_MINUTES: ${VOICE_HOLD_MINUTES:-5}
+      VOICE_SLOT_SECRET: ${VOICE_SLOT_SECRET:?Ustaw losowy VOICE_SLOT_SECRET w .env.production}
+      VOICE_SETUP_TOKEN: ${VOICE_SETUP_TOKEN:?Ustaw losowy VOICE_SETUP_TOKEN w .env.production}
+      VOICE_SESSION_HOURS: ${VOICE_SESSION_HOURS:-8}
+      VOICE_PROVIDER: ${VOICE_PROVIDER:-local}
+      CALENDAR_PROVIDER: ${CALENDAR_PROVIDER:-local}
+      ALLOW_LOCAL_PROVIDERS: ${ALLOW_LOCAL_PROVIDERS:-true}
+      VOICE_WEBHOOK_SECRET: ${VOICE_WEBHOOK_SECRET:-}
+      VOICE_HUMAN_TRANSFER_NUMBER: ${VOICE_HUMAN_TRANSFER_NUMBER:-}
+      VAPI_API_KEY: ${VAPI_API_KEY:-}
+      VAPI_ASSISTANT_ID: ${VAPI_ASSISTANT_ID:-}
+      VAPI_PHONE_NUMBER_ID: ${VAPI_PHONE_NUMBER_ID:-}
+      VAPI_SERVER_CREDENTIAL_ID: ${VAPI_SERVER_CREDENTIAL_ID:-}
+      CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_DEFAULT_ATTENDEE_EMAIL: ${CALCOM_DEFAULT_ATTENDEE_EMAIL:-}
+      CALCOM_EVENT_TYPE_KOLORYZACJA: ${CALCOM_EVENT_TYPE_KOLORYZACJA:-}
+      CALCOM_EVENT_TYPE_STRZYZENIE: ${CALCOM_EVENT_TYPE_STRZYZENIE:-}
+      CALCOM_EVENT_TYPE_KONSULTACJA: ${CALCOM_EVENT_TYPE_KONSULTACJA:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

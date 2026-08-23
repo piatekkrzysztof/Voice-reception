@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createVoiceDatabase } from './database.mjs';
+import { createVoiceDatabase } from './database-factory.mjs';
 import { createCalendar } from './calendar.mjs';
 import { publicVoiceConfig } from '../config.mjs';
 
@@ -73,16 +73,16 @@ export function verifyVapiWebhook(headers, webhookSecret) {
   return expectedBuffer.length === providedBuffer.length && crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
-export function createVoiceService({ config, state, databasePath }) {
+export async function createVoiceService({ config, state, databasePath }) {
   const voice = config.voice;
   const tenantId = voice.business.tenantId;
-  const db = createVoiceDatabase({ path: databasePath || voice.databasePath, tenantId, seedCalls: state.calls || [] });
-  db.configureEventTypes(voice.calcom.eventTypes, tenantId);
+  const db = await createVoiceDatabase({ config, path: databasePath || voice.databasePath, tenantId, seedCalls: state.calls || [] });
+  await db.configureEventTypes(voice.calcom.eventTypes, tenantId);
   const calendar = createCalendar(voice);
 
-  function serviceBy(value) {
+  async function serviceBy(value) {
     const normalized = String(value || '').trim().toLocaleLowerCase('pl-PL');
-    const service = db.listServices(tenantId).find((item) => item.id === value || item.slug === normalized || item.name.toLocaleLowerCase('pl-PL') === normalized);
+    const service = (await db.listServices(tenantId)).find((item) => item.id === value || item.slug === normalized || item.name.toLocaleLowerCase('pl-PL') === normalized);
     if (!service) throw error(`Nie obsługujemy usługi „${value}”.`, 'SERVICE_NOT_FOUND', 404);
     return service;
   }
@@ -90,10 +90,11 @@ export function createVoiceService({ config, state, databasePath }) {
   async function availability({ service: serviceValue, preferredDate, timeRange = 'any' }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredDate || '')) throw error('Data musi mieć format YYYY-MM-DD.', 'DATE_INVALID');
     if (preferredDate < dateInTimeZone(new Date(), voice.timezone)) throw error('Nie można rezerwować terminu w przeszłości.', 'DATE_IN_PAST', 422);
-    const service = serviceBy(serviceValue);
+    const service = await serviceBy(serviceValue);
     const calendarSlots = await calendar.availability({ date: preferredDate, service });
+    const free = await Promise.all(calendarSlots.map((slot) => db.slotIsFree({ tenantId, serviceId: service.id, startAt: slot.start, endAt: slot.end })));
     const slots = calendarSlots
-      .filter((slot) => db.slotIsFree({ tenantId, serviceId: service.id, startAt: slot.start, endAt: slot.end }))
+      .filter((slot, index) => free[index])
       .filter((slot) => {
         const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: voice.timezone }).format(new Date(slot.start)));
         return timeRange === 'morning' ? hour < 13 : timeRange === 'afternoon' ? hour >= 13 : true;
@@ -109,19 +110,19 @@ export function createVoiceService({ config, state, databasePath }) {
         duration: service.durationMinutes,
         provider: calendar.name
       }));
-    db.recordEvent({ tenantId, type: 'availability.checked', detail: { service: service.name, preferredDate, results: slots.length, provider: calendar.name } });
+    await db.recordEvent({ tenantId, type: 'availability.checked', detail: { service: service.name, preferredDate, results: slots.length, provider: calendar.name } });
     return { slots, checkedAt: new Date().toISOString(), provider: calendar.name, timezone: voice.timezone };
   }
 
   async function createHold({ slotId }) {
     const slot = verifySlot(slotId, voice.slotSecret);
     if (slot.tenantId !== tenantId) throw error('Termin należy do innej organizacji.', 'TENANT_MISMATCH', 403);
-    const service = serviceBy(slot.serviceId);
-    if (!db.slotIsFree({ tenantId, serviceId: service.id, startAt: slot.startAt, endAt: slot.endAt })) throw error('Termin nie jest już dostępny.', 'SLOT_UNAVAILABLE', 409);
+    const service = await serviceBy(slot.serviceId);
+    if (!await db.slotIsFree({ tenantId, serviceId: service.id, startAt: slot.startAt, endAt: slot.endAt })) throw error('Termin nie jest już dostępny.', 'SLOT_UNAVAILABLE', 409);
     let providerReservationUid = null;
     try {
       providerReservationUid = await calendar.reserve({ service, startAt: slot.startAt, endAt: slot.endAt });
-      const hold = db.createHold({
+      const hold = await db.createHold({
         tenantId,
         serviceId: service.id,
         startAt: slot.startAt,
@@ -129,7 +130,7 @@ export function createVoiceService({ config, state, databasePath }) {
         expiresAt: new Date(Date.now() + voice.holdMinutes * 60_000).toISOString(),
         providerReservationUid
       });
-      db.recordEvent({ tenantId, type: 'hold.created', detail: { holdId: hold.id, service: service.name, startAt: hold.startAt } });
+      await db.recordEvent({ tenantId, type: 'hold.created', detail: { holdId: hold.id, service: service.name, startAt: hold.startAt } });
       return {
         hold,
         slot: { service: service.name, start: hold.startAt, end: hold.endAt, date: hold.startAt.slice(0, 10), time: timeLabel(hold.startAt, voice.timezone), duration: service.durationMinutes }
@@ -142,46 +143,49 @@ export function createVoiceService({ config, state, databasePath }) {
 
   async function confirmBooking({ holdId, customerName, phone, email, idempotencyKey }) {
     if (!idempotencyKey) throw error('Brak Idempotency-Key.', 'IDEMPOTENCY_REQUIRED');
-    const existing = db.findBookingByIdempotency(idempotencyKey);
+    const existing = await db.findBookingByIdempotency(idempotencyKey);
     if (existing) return { confirmed: true, booking: existing, idempotentReplay: true };
     if (!customerName?.trim()) throw error('Imię klienta jest wymagane.', 'CUSTOMER_NAME_REQUIRED');
     if (!/^\+?[0-9][0-9\s-]{7,18}$/.test(phone || '')) throw error('Numer telefonu ma nieprawidłowy format.', 'PHONE_INVALID');
-    const hold = db.claimHold(holdId, tenantId);
-    const service = serviceBy(hold.serviceId);
+    const hold = await db.claimHold(holdId, tenantId);
+    const service = await serviceBy(hold.serviceId);
     let providerBooking = null;
     try {
       if (hold.providerReservationUid) await calendar.releaseReservation(hold.providerReservationUid);
       providerBooking = await calendar.book({ hold, service, customer: { name: customerName.trim(), phone, email } });
-      const booking = db.confirmHold({ hold, customerName: customerName.trim(), phone, email, providerUid: providerBooking.uid, idempotencyKey });
-      db.recordEvent({ tenantId, type: 'booking.confirmed', detail: { bookingId: booking.id, providerUid: booking.providerUid, service: service.name, startAt: booking.startAt } });
+      const booking = await db.confirmHold({ hold, customerName: customerName.trim(), phone, email, providerUid: providerBooking.uid, idempotencyKey });
+      await db.recordEvent({ tenantId, type: 'booking.confirmed', detail: { bookingId: booking.id, providerUid: booking.providerUid, service: service.name, startAt: booking.startAt } });
       return { confirmed: true, booking };
     } catch (caught) {
-      db.releaseClaim(hold.id);
+      await db.releaseClaim(hold.id);
       if (providerBooking?.uid) await calendar.cancel(providerBooking.uid, 'Kompensacja po błędzie lokalnej transakcji').catch(() => {});
-      db.recordEvent({ tenantId, type: 'booking.failed', detail: { holdId, code: caught.code || 'UNKNOWN', message: caught.message } });
+      await db.recordEvent({ tenantId, type: 'booking.failed', detail: { holdId, code: caught.code || 'UNKNOWN', message: caught.message } });
       throw caught;
     }
   }
 
   async function cancelBooking({ bookingId, reason }) {
-    const booking = db.listBookings(tenantId, 200).find((item) => item.id === bookingId || item.providerUid === bookingId);
+    const booking = (await db.listBookings(tenantId, 200)).find((item) => item.id === bookingId || item.providerUid === bookingId);
     if (!booking) throw error('Nie znaleziono rezerwacji.', 'BOOKING_NOT_FOUND', 404);
     if (booking.status !== 'confirmed') throw error('Rezerwacja nie jest aktywna.', 'BOOKING_NOT_ACTIVE', 409);
     await calendar.cancel(booking.providerUid, reason);
-    const cancelled = db.cancelBooking(booking.id, tenantId);
-    db.recordEvent({ tenantId, type: 'booking.cancelled', detail: { bookingId: booking.id, reason } });
+    const cancelled = await db.cancelBooking(booking.id, tenantId);
+    await db.recordEvent({ tenantId, type: 'booking.cancelled', detail: { bookingId: booking.id, reason } });
     return { cancelled: true, booking: cancelled };
   }
 
-  function dashboard() {
-    const calls = db.listCalls(tenantId);
-    const bookings = db.listBookings(tenantId);
-    const totals = db.stats(tenantId);
+  async function dashboard() {
+    const [calls, bookings, totals, services] = await Promise.all([
+      db.listCalls(tenantId),
+      db.listBookings(tenantId),
+      db.stats(tenantId),
+      db.listServices(tenantId)
+    ]);
     const integration = publicVoiceConfig(config);
     return {
       calls,
       bookings,
-      services: db.listServices(tenantId),
+      services,
       integration,
       metrics: {
         calls: Number(totals.calls),
@@ -226,10 +230,10 @@ export function createVoiceService({ config, state, databasePath }) {
         try {
           const result = await handleToolCall(toolCall, callId);
           results.push({ name, toolCallId: toolCall.id, result: JSON.stringify({ success: true, ...result }) });
-          db.recordEvent({ tenantId, callId, type: 'tool.succeeded', detail: { name, toolCallId: toolCall.id } });
+          await db.recordEvent({ tenantId, callId, type: 'tool.succeeded', detail: { name, toolCallId: toolCall.id } });
         } catch (caught) {
           results.push({ name, toolCallId: toolCall.id, result: JSON.stringify({ success: false, code: caught.code || 'TOOL_ERROR', message: caught.message }) });
-          db.recordEvent({ tenantId, callId, type: 'tool.failed', detail: { name, toolCallId: toolCall.id, code: caught.code || 'TOOL_ERROR' } });
+          await db.recordEvent({ tenantId, callId, type: 'tool.failed', detail: { name, toolCallId: toolCall.id, code: caught.code || 'TOOL_ERROR' } });
         }
       }
       return { results };
@@ -237,7 +241,7 @@ export function createVoiceService({ config, state, databasePath }) {
 
     if (message.type === 'status-update') {
       const call = message.call || {};
-      db.upsertCall({
+      await db.upsertCall({
         externalId: call.id,
         tenantId,
         provider: 'vapi',
@@ -256,7 +260,7 @@ export function createVoiceService({ config, state, databasePath }) {
       const startedAt = call.startedAt || message.startedAt || new Date().toISOString();
       const endedAt = call.endedAt || message.endedAt || new Date().toISOString();
       const durationSeconds = message.durationSeconds || Math.max(0, Math.round((new Date(endedAt) - new Date(startedAt)) / 1000));
-      db.upsertCall({
+      await db.upsertCall({
         externalId: call.id,
         tenantId,
         provider: 'vapi',
@@ -273,11 +277,11 @@ export function createVoiceService({ config, state, databasePath }) {
         summary: analysis.summary || structured.summary,
         endedReason: call.endedReason
       });
-      db.recordEvent({ tenantId, callId: call.id, type: 'call.ended', detail: { outcome: structured.outcome || 'UNRESOLVED', endedReason: call.endedReason } });
+      await db.recordEvent({ tenantId, callId: call.id, type: 'call.ended', detail: { outcome: structured.outcome || 'UNRESOLVED', endedReason: call.endedReason } });
       return {};
     }
 
-    db.recordEvent({ tenantId, callId, type: `vapi.${message.type}`, detail: { received: true } });
+    await db.recordEvent({ tenantId, callId, type: `vapi.${message.type}`, detail: { received: true } });
     return {};
   }
 
@@ -290,6 +294,7 @@ export function createVoiceService({ config, state, databasePath }) {
     handleVapiMessage,
     config: () => publicVoiceConfig(config),
     close: () => db.close(),
+    ready: () => db.health(),
     database: db
   };
 }

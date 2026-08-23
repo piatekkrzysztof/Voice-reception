@@ -3,7 +3,8 @@ import { createReadStream, existsSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
-import { loadConfig } from './src/config.mjs';
+import { assertValidConfig, loadConfig } from './src/config.mjs';
+import { createAuthService } from './src/auth.mjs';
 import { createVoiceService, verifyVapiWebhook } from './src/voice/service.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -27,8 +28,8 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-function requestError(res, status, message, code = 'REQUEST_ERROR') {
-  json(res, status, { error: { code, message } });
+function requestError(res, status, message, code = 'REQUEST_ERROR', headers = {}) {
+  json(res, status, { error: { code, message } }, headers);
 }
 
 async function parseBody(req) {
@@ -48,22 +49,27 @@ async function parseBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-function applySecurityHeaders(res) {
+function applySecurityHeaders(res, config) {
   res.setHeader('x-content-type-options', 'nosniff');
   res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('cross-origin-opener-policy', 'same-origin');
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
   res.setHeader('referrer-policy', 'no-referrer');
   res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+  if (config.production) res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
 }
 
 export async function createApp(options = {}) {
   const config = options.config || loadConfig(options.env || {});
+  assertValidConfig(config);
   const voiceDatabasePath = options.voiceDbPath || config.voice.databasePath;
-  const voiceService = createVoiceService({ config, state: { calls: [] }, databasePath: voiceDatabasePath });
+  const voiceService = await createVoiceService({ config, state: { calls: [] }, databasePath: voiceDatabasePath });
+  const authService = createAuthService({ database: voiceService.database, config });
 
   const server = http.createServer(async (req, res) => {
     try {
-      applySecurityHeaders(res);
+      applySecurityHeaders(res, config);
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const route = url.pathname;
 
@@ -71,23 +77,61 @@ export async function createApp(options = {}) {
         return json(res, 200, {
           status: 'ok',
           service: 'voice-reception',
-          version: '1.0.0',
+          version: '1.1.0',
           time: new Date().toISOString()
         });
       }
+      if (route === '/api/ready' && req.method === 'GET') {
+        try {
+          await voiceService.ready();
+          return json(res, 200, { status: 'ready', database: config.database.provider, time: new Date().toISOString() });
+        } catch (error) {
+          console.error('Readiness check failed', error);
+          return json(res, 503, { status: 'not-ready', database: config.database.provider });
+        }
+      }
+      if (route === '/api/auth/status' && req.method === 'GET') {
+        return json(res, 200, await authService.status(req));
+      }
+      if (route === '/api/auth/setup' && req.method === 'POST') {
+        authService.assertSafeMutation(req);
+        const result = await authService.setup(req, await parseBody(req));
+        return json(res, 201, { authenticated: true, user: result.user }, { 'set-cookie': result.setCookie });
+      }
+      if (route === '/api/auth/login' && req.method === 'POST') {
+        authService.assertSafeMutation(req);
+        const result = await authService.login(req, await parseBody(req));
+        return json(res, 200, { authenticated: true, user: result.user }, { 'set-cookie': result.setCookie });
+      }
+      if (route === '/api/auth/logout' && req.method === 'POST') {
+        authService.assertSafeMutation(req);
+        const result = await authService.logout(req);
+        return json(res, 200, { authenticated: false }, { 'set-cookie': result.setCookie });
+      }
+      if (route === '/api/auth/me' && req.method === 'GET') {
+        return json(res, 200, { user: await authService.requireUser(req) });
+      }
       if (route === '/api/voice' && req.method === 'GET') {
-        return json(res, 200, voiceService.dashboard());
+        await authService.requireUser(req);
+        return json(res, 200, await voiceService.dashboard());
       }
       if (route === '/api/voice/config' && req.method === 'GET') {
+        await authService.requireUser(req);
         return json(res, 200, voiceService.config());
       }
       if (route === '/api/voice/availability' && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
         return json(res, 200, await voiceService.availability(await parseBody(req)));
       }
       if (route === '/api/voice/holds' && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
         return json(res, 201, await voiceService.createHold(await parseBody(req)));
       }
       if (route === '/api/voice/bookings' && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
         const body = await parseBody(req);
         const result = await voiceService.confirmBooking({
           holdId: body.holdId,
@@ -100,6 +144,8 @@ export async function createApp(options = {}) {
       }
       const cancellation = route.match(/^\/api\/voice\/bookings\/([^/]+)\/cancel$/);
       if (cancellation && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
         const body = await parseBody(req);
         return json(res, 200, await voiceService.cancelBooking({ bookingId: cancellation[1], reason: body.reason }));
       }
@@ -128,22 +174,60 @@ export async function createApp(options = {}) {
     } catch (caught) {
       const status = caught.status || (caught instanceof SyntaxError ? 400 : 500);
       if (status >= 500) console.error(caught);
-      if (!res.headersSent) return requestError(res, status, caught.message || 'Błąd serwera.', caught.code || 'SERVER_ERROR');
+      const headers = caught.retryAfter ? { 'retry-after': String(caught.retryAfter) } : {};
+      const message = status >= 500 ? 'Wystąpił nieoczekiwany błąd serwera.' : (caught.message || 'Błąd żądania.');
+      if (!res.headersSent) return requestError(res, status, message, caught.code || 'SERVER_ERROR', headers);
       res.end();
     }
   });
 
-  server.on('close', () => voiceService.close());
-  return { server, voiceDatabasePath, voiceService };
+  let closePromise;
+  function closeResources() {
+    closePromise ||= Promise.resolve(voiceService.close());
+    return closePromise;
+  }
+  server.on('close', () => { closeResources().catch((error) => console.error('Database shutdown failed', error)); });
+  async function close() {
+    if (server.listening) {
+      await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose()));
+    }
+    await closeResources();
+  }
+  return { server, voiceDatabasePath, voiceService, authService, close, config };
 }
 
 async function start() {
   const config = loadConfig();
-  const { server, voiceDatabasePath } = await createApp({ config });
-  server.listen(config.port, config.host, () => {
-    console.log(`Voice Reception działa: http://${config.host}:${config.port}`);
-    console.log(`Voice DB: ${voiceDatabasePath}`);
+  const app = await createApp({ config });
+  const { server, voiceDatabasePath } = app;
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(config.port, config.host, () => {
+      server.off('error', rejectListen);
+      resolveListen();
+    });
   });
+  console.log(`Voice Reception działa: http://${config.host}:${config.port}`);
+  console.log(`Voice DB: ${config.database.provider === 'postgres' ? 'PostgreSQL' : voiceDatabasePath}`);
+
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Odebrano ${signal}. Zamykanie połączeń…`);
+    const timeout = setTimeout(() => {
+      console.error('Przekroczono czas łagodnego zamknięcia.');
+      process.exitCode = 1;
+    }, 10_000);
+    timeout.unref();
+    try {
+      await app.close();
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+  process.once('SIGINT', () => { shutdown('SIGINT').catch(console.error); });
+  process.once('SIGTERM', () => { shutdown('SIGTERM').catch(console.error); });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
