@@ -5,7 +5,7 @@ and cannot double-book, because the booking is a database transaction rather tha
 promise made in conversation.
 
 ![node](https://img.shields.io/badge/node-24-339933)
-![tests](https://img.shields.io/badge/tests-15%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)
 ![deps](https://img.shields.io/badge/runtime%20deps-1-blue)
 ![status](https://img.shields.io/badge/status-pilot%20ready-yellow)
 ![licence](https://img.shields.io/badge/licence-source--available-lightgrey)
@@ -153,7 +153,7 @@ The runner is Node's built-in `node --test`. No Jest, no Vitest, no configuratio
 
 |                        |                                                                          |
 | ---------------------- | ------------------------------------------------------------------------ |
-| Tests                  | **15 passing**, 0 failing (measured with `TEST_DATABASE_URL` set)        |
+| Tests                  | **20 passing**, 0 failing (measured with `TEST_DATABASE_URL` set)        |
 | Without a database URL | 14 passing, 1 skipped — the PostgreSQL race test                         |
 | Runtime                | ~1.2 s                                                                   |
 | CI                     | SQLite suite · real PostgreSQL transaction test · production image build |
@@ -208,10 +208,13 @@ backup, a retention policy and a tenant configuration screen. None of those exis
 
 Beyond that:
 
-- **15 tests is a floor, not a suite.** They cover the rules that matter most, but there
-  are no contract tests against a recorded voice session, none for a repeated webhook,
-  none for a call dropped between hold and confirm, and none for retry or overload.
-- **No linter or formatter**, no coverage measurement, no dependency scan in CI.
+- **20 tests is a floor, not a suite.** A repeated webhook, a call dropped between hold
+  and confirm, and a late confirmation of an abandoned hold are now covered. Still missing:
+  contract tests against a recorded voice session, and behaviour under retry or overload
+  when the external calendar is slow or refusing.
+- **No coverage threshold yet.** ESLint, Prettier and `npm audit` gate every pull request,
+  and coverage is measured with PostgreSQL attached — but only reported, not enforced.
+  The threshold will be set from the first measured run rather than guessed.
 - **Local mode does not answer telephones.** Everything is exercisable except the thing
   the product exists for; that needs external providers.
 - **One migration.** The schema has barely evolved, so the migration path is untested in
@@ -226,9 +229,8 @@ Beyond that:
 ## Roadmap
 
 **Now — the tests these failure modes deserve.** Contract tests against recorded voice
-sessions, booking idempotency under repeated tool calls, a repeated webhook, a call
-dropped between hold and confirm, and behaviour under retry or overload. ESLint, Prettier,
-coverage and dependency scanning in CI.
+sessions, and behaviour under retry or overload when the external calendar is slow or
+refusing. A coverage threshold, set from the measured number.
 
 **Next — latency and cost as numbers.** Time to first response and p95 across the whole
 `availability → hold → confirm` path, plus the cost of one booked call. A voice product
