@@ -12,6 +12,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Lint i formatowanie nie potrzebuja bazy ani Dockera, wiec ida osobno
+  # i konczą sie w kilkanascie sekund -- literowka nie kaze czekac na caly
+  # przebieg testow z PostgreSQL i budowaniem obrazu.
+  jakosc:
+    name: Lint i formatowanie
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier
+        run: npm run format:check
+
+      # Projekt ma jedna zaleznosc produkcyjna, wiec skan jest tani i szybki.
+      # Blokujemy dopiero na powaznych podatnosciach: ostrzezenie o czyms
+      # niskim nie moze zatrzymac wdrozenia poprawki bezpieczenstwa.
+      - name: Skan zaleznosci
+        run: npm audit --audit-level=high
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -47,6 +75,24 @@ jobs:
         run: npm test
         env:
           TEST_DATABASE_URL: postgresql://voice:voice_ci_password@127.0.0.1:5432/voice_reception_test
+
+      # Pokrycie mierzymy TYLKO tutaj, bo dopiero z PostgreSQL wykonuje sie
+      # adapter bazy produkcyjnej -- bez niego ten plik ma 3,8% i kazda liczba
+      # zbiorcza jest zmyslona.
+      #
+      # Na razie zadanie tylko raportuje, celowo. Prog ustawimy na wartosci
+      # ZMIERZONEJ w pierwszym przebiegu, minimalnie ponizej niej, a potem
+      # bedziemy go podnosic. Prog wziety z sufitu albo przepuszcza wszystko,
+      # albo blokuje prace i konczy sie wylaczeniem calego pomiaru.
+      - name: Pokrycie kodu
+        continue-on-error: true
+        env:
+          TEST_DATABASE_URL: postgresql://voice:voice_ci_password@127.0.0.1:5432/voice_reception_test
+        run: |
+          npm run test:coverage 2>&1 | tee pokrycie.txt || true
+          LINIE=$(grep -E '^# all files' pokrycie.txt | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          GALEZIE=$(grep -E '^# all files' pokrycie.txt | awk -F'|' '{gsub(/ /,"",$3); print $3}')
+          echo "::notice title=Pokrycie kodu::linie ${LINIE}%, galezie ${GALEZIE}% (z PostgreSQL)"
 
       - name: Build production image
         run: docker build --tag voice-reception:ci .

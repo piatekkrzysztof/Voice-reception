@@ -12,8 +12,8 @@ function voiceConfig() {
       apiKey: 'cal_test_key',
       apiUrl: 'https://api.cal.test',
       defaultAttendeeEmail: 'recepcja@example.com',
-      reserveSlots: false
-    }
+      reserveSlots: false,
+    },
   };
 }
 
@@ -22,11 +22,24 @@ test('adapter Cal.com używa wersji API slotów 2024-09-04', async () => {
   let captured;
   globalThis.fetch = async (url, options) => {
     captured = { url: String(url), options };
-    return new Response(JSON.stringify({ status: 'success', data: { '2030-01-02': [{ start: '2030-01-02T10:00:00.000+01:00', end: '2030-01-02T11:00:00.000+01:00' }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        status: 'success',
+        data: {
+          '2030-01-02': [
+            { start: '2030-01-02T10:00:00.000+01:00', end: '2030-01-02T11:00:00.000+01:00' },
+          ],
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
   };
   try {
     const calendar = createCalendar(voiceConfig());
-    const slots = await calendar.availability({ date: '2030-01-02', service: { name: 'Strzyżenie', durationMinutes: 60, externalEventTypeId: 88 } });
+    const slots = await calendar.availability({
+      date: '2030-01-02',
+      service: { name: 'Strzyżenie', durationMinutes: 60, externalEventTypeId: 88 },
+    });
     assert.equal(slots.length, 1);
     assert.equal(captured.options.headers['cal-api-version'], '2024-09-04');
     assert.match(captured.url, /eventTypeId=88/);
@@ -41,14 +54,28 @@ test('adapter Cal.com tworzy booking w API 2026-02-25 bez omijania konfliktów',
   let captured;
   globalThis.fetch = async (url, options) => {
     captured = { url: String(url), options, body: JSON.parse(options.body) };
-    return new Response(JSON.stringify({ status: 'success', data: { uid: 'cal-booking-1', start: '2030-01-02T09:00:00.000Z', end: '2030-01-02T10:00:00.000Z' } }), { status: 201, headers: { 'content-type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        status: 'success',
+        data: {
+          uid: 'cal-booking-1',
+          start: '2030-01-02T09:00:00.000Z',
+          end: '2030-01-02T10:00:00.000Z',
+        },
+      }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    );
   };
   try {
     const calendar = createCalendar(voiceConfig());
     const result = await calendar.book({
-      hold: { id: 'HOLD-1', startAt: '2030-01-02T09:00:00.000Z', endAt: '2030-01-02T10:00:00.000Z' },
+      hold: {
+        id: 'HOLD-1',
+        startAt: '2030-01-02T09:00:00.000Z',
+        endAt: '2030-01-02T10:00:00.000Z',
+      },
       service: { externalEventTypeId: 88 },
-      customer: { name: 'Anna Nowak', phone: '+48600100200' }
+      customer: { name: 'Anna Nowak', phone: '+48600100200' },
     });
     assert.equal(result.uid, 'cal-booking-1');
     assert.equal(captured.options.headers['cal-api-version'], '2026-02-25');
@@ -66,8 +93,8 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
       business: { name: 'Atelier Północ' },
       timezone: 'Europe/Warsaw',
       humanTransferNumber: '+48123456789',
-      vapi: { serverCredentialId: 'cred-123' }
-    }
+      vapi: { serverCredentialId: 'cred-123' },
+    },
   };
   const assistant = buildVapiAssistantConfig(config);
   assert.match(assistant.firstMessage, /automatyczna asystentka AI/i);

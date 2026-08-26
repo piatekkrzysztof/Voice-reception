@@ -10,9 +10,9 @@ services:
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Ustaw domenę wskazującą na serwer}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -30,7 +30,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voice -d voice_reception"]
+      test: ['CMD-SHELL', 'pg_isready -U voice -d voice_reception']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -48,7 +48,7 @@ services:
       database:
         condition: service_healthy
     expose:
-      - "4173"
+      - '4173'
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -79,7 +79,13 @@ services:
       CALCOM_EVENT_TYPE_STRZYZENIE: ${CALCOM_EVENT_TYPE_STRZYZENIE:-}
       CALCOM_EVENT_TYPE_KONSULTACJA: ${CALCOM_EVENT_TYPE_KONSULTACJA:-}
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4173/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
       interval: 15s
       timeout: 5s
       retries: 5

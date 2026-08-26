@@ -9,7 +9,7 @@ test('produkcja odrzuca SQLite, HTTP i słabe sekrety', () => {
     VOICE_SLOT_SECRET: 'short',
     VOICE_SETUP_TOKEN: 'short',
     VOICE_PROVIDER: 'local',
-    CALENDAR_PROVIDER: 'local'
+    CALENDAR_PROVIDER: 'local',
   });
   const issues = validateConfig(config);
   assert.ok(issues.some((issue) => issue.includes('HTTPS')));
@@ -28,7 +28,7 @@ test('kontrolowane demo produkcyjne akceptuje PostgreSQL i lokalne adaptery po j
     VOICE_SETUP_TOKEN: 'setup-token-with-more-than-32-characters',
     VOICE_PROVIDER: 'local',
     CALENDAR_PROVIDER: 'local',
-    ALLOW_LOCAL_PROVIDERS: 'true'
+    ALLOW_LOCAL_PROVIDERS: 'true',
   });
   assert.deepEqual(validateConfig(config), []);
 });

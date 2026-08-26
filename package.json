@@ -10,12 +10,22 @@
     "test": "node --test",
     "reset": "node scripts/reset-local.mjs",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
-    "voice:sync": "node --env-file-if-exists=.env scripts/sync-vapi-assistant.mjs"
+    "voice:sync": "node --env-file-if-exists=.env scripts/sync-vapi-assistant.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:coverage": "node --test --experimental-test-coverage"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
     "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6"
   }
 }

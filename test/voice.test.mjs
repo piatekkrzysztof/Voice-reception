@@ -20,15 +20,17 @@ before(async () => {
       CALENDAR_PROVIDER: 'local',
       VOICE_SLOT_SECRET: 'contract-test-slot-secret',
       VOICE_WEBHOOK_SECRET: 'contract-test-webhook-secret',
-      PUBLIC_BASE_URL: 'http://127.0.0.1:4173'
-    }
+      PUBLIC_BASE_URL: 'http://127.0.0.1:4173',
+    },
   });
-  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  await new Promise((resolve) => {
+    app.server.listen(0, '127.0.0.1', resolve);
+  });
   baseUrl = `http://127.0.0.1:${app.server.address().port}`;
   const setupResponse = await fetch(`${baseUrl}/api/auth/setup`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' })
+    body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' }),
   });
   assert.equal(setupResponse.status, 201);
   sessionCookie = setupResponse.headers.get('set-cookie').split(';')[0];
@@ -45,8 +47,8 @@ async function request(path, options = {}, authenticated = true) {
     headers: {
       'content-type': 'application/json',
       ...(authenticated && sessionCookie ? { cookie: sessionCookie } : {}),
-      ...(options.headers || {})
-    }
+      ...(options.headers || {}),
+    },
   });
   return { response, body: await response.json() };
 }
@@ -76,10 +78,14 @@ test('konsola i dane klientów wymagają zalogowanej sesji', async () => {
 });
 
 test('pierwsza konfiguracja jest jednorazowa, a hasło nie trafia do bazy', async () => {
-  const repeatedSetup = await request('/api/auth/setup', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'second@voice.test', password: 'Another-Strong-Password!' })
-  }, false);
+  const repeatedSetup = await request(
+    '/api/auth/setup',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email: 'second@voice.test', password: 'Another-Strong-Password!' }),
+    },
+    false,
+  );
   assert.equal(repeatedSetup.response.status, 409);
   assert.equal(repeatedSetup.body.error.code, 'AUTH_SETUP_COMPLETE');
 
@@ -89,25 +95,37 @@ test('pierwsza konfiguracja jest jednorazowa, a hasło nie trafia do bazy', asyn
 });
 
 test('logowanie wydaje sesję HttpOnly, a limit prób blokuje brute force', async () => {
-  const login = await request('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' })
-  }, false);
+  const login = await request(
+    '/api/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email: 'owner@voice.test', password: 'Correct-Horse-2030!' }),
+    },
+    false,
+  );
   assert.equal(login.response.status, 200);
   assert.match(login.response.headers.get('set-cookie'), /HttpOnly/);
   assert.match(login.response.headers.get('set-cookie'), /SameSite=Strict/);
 
   for (let index = 0; index < 5; index += 1) {
-    const failed = await request('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' })
-    }, false);
+    const failed = await request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' }),
+      },
+      false,
+    );
     assert.equal(failed.response.status, 401);
   }
-  const limited = await request('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' })
-  }, false);
+  const limited = await request(
+    '/api/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email: 'attacker@voice.test', password: 'Wrong-password-value' }),
+    },
+    false,
+  );
   assert.equal(limited.response.status, 429);
   assert.equal(limited.body.error.code, 'AUTH_RATE_LIMITED');
   assert.ok(Number(limited.response.headers.get('retry-after')) > 0);
@@ -117,7 +135,7 @@ test('operacje zmieniające dane odrzucają obce źródło', async () => {
   const rejected = await request('/api/voice/availability', {
     method: 'POST',
     headers: { origin: 'https://evil.example' },
-    body: JSON.stringify({ service: 'svc-coloring', preferredDate: '2030-01-02' })
+    body: JSON.stringify({ service: 'svc-coloring', preferredDate: '2030-01-02' }),
   });
   assert.equal(rejected.response.status, 403);
   assert.equal(rejected.body.error.code, 'AUTH_ORIGIN_REJECTED');
@@ -126,7 +144,7 @@ test('operacje zmieniające dane odrzucają obce źródło', async () => {
 test('booking korzysta z podpisanego slotu, holdu i idempotentnego potwierdzenia', async () => {
   const availability = await request('/api/voice/availability', {
     method: 'POST',
-    body: JSON.stringify({ service: 'svc-coloring', preferredDate: '2030-01-02' })
+    body: JSON.stringify({ service: 'svc-coloring', preferredDate: '2030-01-02' }),
   });
   assert.equal(availability.response.status, 200);
   assert.ok(availability.body.slots.length > 1);
@@ -134,20 +152,24 @@ test('booking korzysta z podpisanego slotu, holdu i idempotentnego potwierdzenia
 
   const hold = await request('/api/voice/holds', {
     method: 'POST',
-    body: JSON.stringify({ slotId: availability.body.slots[0].id })
+    body: JSON.stringify({ slotId: availability.body.slots[0].id }),
   });
   assert.equal(hold.response.status, 201);
   assert.equal(hold.body.hold.status, 'active');
 
   const duplicateHold = await request('/api/voice/holds', {
     method: 'POST',
-    body: JSON.stringify({ slotId: availability.body.slots[0].id })
+    body: JSON.stringify({ slotId: availability.body.slots[0].id }),
   });
   assert.equal(duplicateHold.response.status, 409);
   assert.equal(duplicateHold.body.error.code, 'SLOT_UNAVAILABLE');
 
   const headers = { 'idempotency-key': 'booking-confirm-contract-test' };
-  const payload = JSON.stringify({ holdId: hold.body.hold.id, customerName: 'Anna Nowak', phone: '+48600100200' });
+  const payload = JSON.stringify({
+    holdId: hold.body.hold.id,
+    customerName: 'Anna Nowak',
+    phone: '+48600100200',
+  });
   const first = await request('/api/voice/bookings', { method: 'POST', body: payload, headers });
   const repeated = await request('/api/voice/bookings', { method: 'POST', body: payload, headers });
   assert.equal(first.response.status, 201);
@@ -164,13 +186,15 @@ test('Vapi Tool Gateway zwraca wymagany kontrakt result', async () => {
       message: {
         type: 'tool-calls',
         call: { id: 'vapi-contract-call' },
-        toolCallList: [{
-          id: 'tool-call-availability',
-          name: 'check_availability',
-          arguments: { service: 'Strzyżenie', preferredDate: '2030-01-03', timeRange: 'morning' }
-        }]
-      }
-    })
+        toolCallList: [
+          {
+            id: 'tool-call-availability',
+            name: 'check_availability',
+            arguments: { service: 'Strzyżenie', preferredDate: '2030-01-03', timeRange: 'morning' },
+          },
+        ],
+      },
+    }),
   });
   assert.equal(webhook.response.status, 200);
   assert.equal(webhook.body.results[0].toolCallId, 'tool-call-availability');
@@ -182,7 +206,7 @@ test('Vapi Tool Gateway zwraca wymagany kontrakt result', async () => {
 test('webhook Vapi wymaga sekretu i zapisuje wyłącznie raport końcowy', async () => {
   const unauthorized = await request('/api/webhooks/vapi', {
     method: 'POST',
-    body: JSON.stringify({ message: { type: 'status-update' } })
+    body: JSON.stringify({ message: { type: 'status-update' } }),
   });
   assert.equal(unauthorized.response.status, 401);
 
@@ -198,17 +222,19 @@ test('webhook Vapi wymaga sekretu i zapisuje wyłącznie raport końcowy', async
           endedAt: '2030-01-03T10:02:00.000Z',
           endedReason: 'assistant-ended-call',
           customer: { number: '+48600100200' },
-          cost: 1.25
+          cost: 1.25,
         },
         analysis: {
           summary: 'Klient otrzymał informację o dostępnych terminach.',
-          structuredData: { intent: 'Nowa rezerwacja', outcome: 'RESOLVED', aiDisclosure: true }
-        }
-      }
-    })
+          structuredData: { intent: 'Nowa rezerwacja', outcome: 'RESOLVED', aiDisclosure: true },
+        },
+      },
+    }),
   });
   assert.equal(report.response.status, 200);
-  const saved = (await app.voiceService.dashboard()).calls.find((call) => call.externalId === 'vapi-call-finished-1');
+  const saved = (await app.voiceService.dashboard()).calls.find(
+    (call) => call.externalId === 'vapi-call-finished-1',
+  );
   assert.equal(saved.durationSeconds, 120);
   assert.equal(saved.outcome, 'RESOLVED');
 });

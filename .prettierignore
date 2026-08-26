@@ -1,0 +1,10 @@
+node_modules
+data
+package-lock.json
+
+# Konsola: recznie pisany HTML i CSS. Prettier przeformatowalby te pliki
+# w calosci (ponad 1400 linii w samym arkuszu), co daje zerowa wartosc do
+# przejrzenia i skutecznie chowa prawdziwe zmiany w szumie. Kod JavaScript
+# konsoli tez zostaje przy swoim ukladzie -- formatowanie go osobno
+# rozjechaloby sie ze znacznikami, ktore go otaczaja.
+public

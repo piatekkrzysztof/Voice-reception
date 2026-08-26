@@ -151,14 +151,14 @@ The runner is Node's built-in `node --test`. No Jest, no Vitest, no configuratio
 
 ### Current results
 
-| | |
-|---|---|
-| Tests | **15 passing**, 0 failing (measured with `TEST_DATABASE_URL` set) |
-| Without a database URL | 14 passing, 1 skipped — the PostgreSQL race test |
-| Runtime | ~1.2 s |
-| CI | SQLite suite · real PostgreSQL transaction test · production image build |
-| Coverage | not measured |
-| Lint / format | not configured |
+|                        |                                                                          |
+| ---------------------- | ------------------------------------------------------------------------ |
+| Tests                  | **15 passing**, 0 failing (measured with `TEST_DATABASE_URL` set)        |
+| Without a database URL | 14 passing, 1 skipped — the PostgreSQL race test                         |
+| Runtime                | ~1.2 s                                                                   |
+| CI                     | SQLite suite · real PostgreSQL transaction test · production image build |
+| Coverage               | not measured                                                             |
+| Lint / format          | not configured                                                           |
 
 They cover environment and readiness rules, booking rules, hold expiry, the double-booking
 race under a real transaction, the Cal.com v2 adapter contract (including the pinned slots
