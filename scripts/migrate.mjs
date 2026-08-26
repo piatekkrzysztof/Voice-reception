@@ -9,7 +9,7 @@ assertValidConfig(config);
 
 const database = await createPostgresDatabase({
   config: config.database,
-  tenantId: config.voice.business.tenantId
+  tenantId: config.voice.business.tenantId,
 });
 await database.close();
 console.log('Migracje PostgreSQL zostały zastosowane.');

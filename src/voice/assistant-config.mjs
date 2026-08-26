@@ -4,9 +4,9 @@ function functionTool(name, description, properties, required, serverUrl, creden
     function: {
       name,
       description,
-      parameters: { type: 'object', properties, required }
+      parameters: { type: 'object', properties, required },
     },
-    server: { url: serverUrl, timeoutSeconds: 10, ...(credentialId ? { credentialId } : {}) }
+    server: { url: serverUrl, timeoutSeconds: 10, ...(credentialId ? { credentialId } : {}) },
   };
 }
 
@@ -31,30 +31,68 @@ export function buildVapiAssistantConfig(config) {
   const voice = config.voice;
   const credentialId = voice.vapi.serverCredentialId;
   const tools = [
-    functionTool('check_availability', 'Sprawdza prawdziwe wolne terminy usługi. Wywołaj przed zaproponowaniem godziny.', {
-      service: { type: 'string', description: 'Nazwa usługi, np. Koloryzacja' },
-      preferredDate: { type: 'string', description: 'Data w formacie YYYY-MM-DD' },
-      timeRange: { type: 'string', enum: ['morning', 'afternoon', 'any'], description: 'Preferowana pora dnia' }
-    }, ['service', 'preferredDate'], webhookUrl, credentialId),
-    functionTool('create_booking_hold', 'Blokuje wybrany termin na pięć minut. Użyj po wyborze klienta.', {
-      slotId: { type: 'string', description: 'Podpisany identyfikator zwrócony przez check_availability' }
-    }, ['slotId'], webhookUrl, credentialId),
-    functionTool('confirm_booking', 'Potwierdza wcześniej zablokowany termin. Użyj tylko po wyraźnej zgodzie klienta.', {
-      holdId: { type: 'string' },
-      customerName: { type: 'string' },
-      phone: { type: 'string', description: 'Numer w formacie międzynarodowym, np. +48600100200' },
-      email: { type: 'string', description: 'E-mail, jeżeli klient go podał' }
-    }, ['holdId', 'customerName', 'phone'], webhookUrl, credentialId),
-    functionTool('cancel_booking', 'Odwołuje istniejącą rezerwację po potwierdzeniu tożsamości klienta.', {
-      bookingId: { type: 'string' },
-      reason: { type: 'string' }
-    }, ['bookingId'], webhookUrl, credentialId),
-    { type: 'endCall' }
+    functionTool(
+      'check_availability',
+      'Sprawdza prawdziwe wolne terminy usługi. Wywołaj przed zaproponowaniem godziny.',
+      {
+        service: { type: 'string', description: 'Nazwa usługi, np. Koloryzacja' },
+        preferredDate: { type: 'string', description: 'Data w formacie YYYY-MM-DD' },
+        timeRange: {
+          type: 'string',
+          enum: ['morning', 'afternoon', 'any'],
+          description: 'Preferowana pora dnia',
+        },
+      },
+      ['service', 'preferredDate'],
+      webhookUrl,
+      credentialId,
+    ),
+    functionTool(
+      'create_booking_hold',
+      'Blokuje wybrany termin na pięć minut. Użyj po wyborze klienta.',
+      {
+        slotId: {
+          type: 'string',
+          description: 'Podpisany identyfikator zwrócony przez check_availability',
+        },
+      },
+      ['slotId'],
+      webhookUrl,
+      credentialId,
+    ),
+    functionTool(
+      'confirm_booking',
+      'Potwierdza wcześniej zablokowany termin. Użyj tylko po wyraźnej zgodzie klienta.',
+      {
+        holdId: { type: 'string' },
+        customerName: { type: 'string' },
+        phone: {
+          type: 'string',
+          description: 'Numer w formacie międzynarodowym, np. +48600100200',
+        },
+        email: { type: 'string', description: 'E-mail, jeżeli klient go podał' },
+      },
+      ['holdId', 'customerName', 'phone'],
+      webhookUrl,
+      credentialId,
+    ),
+    functionTool(
+      'cancel_booking',
+      'Odwołuje istniejącą rezerwację po potwierdzeniu tożsamości klienta.',
+      {
+        bookingId: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      ['bookingId'],
+      webhookUrl,
+      credentialId,
+    ),
+    { type: 'endCall' },
   ];
   if (voice.humanTransferNumber) {
     tools.push({
       type: 'transferCall',
-      destinations: [{ type: 'number', number: voice.humanTransferNumber }]
+      destinations: [{ type: 'number', number: voice.humanTransferNumber }],
     });
   }
 
@@ -67,8 +105,17 @@ export function buildVapiAssistantConfig(config) {
       provider: process.env.VAPI_MODEL_PROVIDER || 'openai',
       model: process.env.VAPI_MODEL || 'gpt-4.1-mini',
       temperature: 0.2,
-      messages: [{ role: 'system', content: voiceSystemPrompt({ businessName: voice.business.name, timezone: voice.timezone, transferEnabled: Boolean(voice.humanTransferNumber) }) }],
-      tools
+      messages: [
+        {
+          role: 'system',
+          content: voiceSystemPrompt({
+            businessName: voice.business.name,
+            timezone: voice.timezone,
+            transferEnabled: Boolean(voice.humanTransferNumber),
+          }),
+        },
+      ],
+      tools,
     },
     server: { url: webhookUrl, timeoutSeconds: 15, ...(credentialId ? { credentialId } : {}) },
     serverMessages: ['tool-calls', 'status-update', 'end-of-call-report'],
@@ -82,17 +129,23 @@ export function buildVapiAssistantConfig(config) {
           type: 'object',
           properties: {
             intent: { type: 'string' },
-            outcome: { type: 'string', enum: ['BOOKED', 'RESCHEDULED', 'CANCELLED', 'TRANSFERRED', 'RESOLVED', 'UNRESOLVED'] },
+            outcome: {
+              type: 'string',
+              enum: ['BOOKED', 'RESCHEDULED', 'CANCELLED', 'TRANSFERRED', 'RESOLVED', 'UNRESOLVED'],
+            },
             bookingId: { type: 'string' },
             aiDisclosure: { type: 'boolean' },
-            followupRequired: { type: 'boolean' }
-          }
-        }
-      }
-    }
+            followupRequired: { type: 'boolean' },
+          },
+        },
+      },
+    },
   };
   if (process.env.VAPI_VOICE_PROVIDER && process.env.VAPI_VOICE_ID) {
-    assistant.voice = { provider: process.env.VAPI_VOICE_PROVIDER, voiceId: process.env.VAPI_VOICE_ID };
+    assistant.voice = {
+      provider: process.env.VAPI_VOICE_PROVIDER,
+      voiceId: process.env.VAPI_VOICE_ID,
+    };
   }
   return assistant;
 }

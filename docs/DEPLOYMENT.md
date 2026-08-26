@@ -60,7 +60,7 @@ docker compose --env-file .env.production logs app --tail 100
 Oczekiwany readiness:
 
 ```json
-{"status":"ready","database":"postgres"}
+{ "status": "ready", "database": "postgres" }
 ```
 
 Przy pierwszym wejściu utwórz konto właściciela, podając także `VOICE_SETUP_TOKEN`. Po zakończeniu konfiguracji token można obrócić na nową losową wartość.
