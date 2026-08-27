@@ -218,7 +218,7 @@ function createCalComCalendar(config) {
             timeZone: config.timezone,
             language: 'pl',
           },
-          metadata: { source: 'voice-reception', holdId: hold.id, customerPhone: customer.phone },
+          metadata: { source: 'voice-reception', holdId: hold.id },
         },
       });
       return { uid: data.uid, start: data.start, end: data.end, raw: data };

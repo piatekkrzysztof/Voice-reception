@@ -81,6 +81,8 @@ test('adapter Cal.com tworzy booking w API 2026-02-25 bez omijania konfliktów',
     assert.equal(captured.options.headers['cal-api-version'], '2026-02-25');
     assert.equal(captured.body.attendee.email, 'recepcja@example.com');
     assert.equal(captured.body.allowConflicts, undefined);
+    assert.deepEqual(captured.body.metadata, { source: 'voice-reception', holdId: 'HOLD-1' });
+    assert.equal(captured.body.metadata.customerPhone, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
