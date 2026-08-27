@@ -25,6 +25,7 @@ Uruchom aplikację i wykonaj próbę operacyjną w panelu Voice. Sprawdź dostę
 ## 2. Cal.com
 
 1. Utwórz trzy event types odpowiadające usługom `coloring`, `haircut` i `consultation`.
+   Ustaw czasy dokładnie: Koloryzacja 120 min, Strzyżenie 60 min, Konsultacja 30 min.
 2. Do pilota jednego właściciela wygeneruj API key. Dla produktu wieloklienckiego zaplanuj OAuth.
 3. Ustaw:
 
@@ -38,6 +39,18 @@ CALCOM_DEFAULT_ATTENDEE_EMAIL=
 CALCOM_RESERVE_SLOTS=true
 CALCOM_TIMEOUT_MS=8000
 ```
+
+Przed przełączeniem providera uruchom kontrolę tylko do odczytu:
+
+```powershell
+npm run calcom:check
+```
+
+Komenda sprawdza klucz API, przynależność i unikalność trzech ID, zgodność czasów usług
+oraz dostępne sloty na 14 dni. Nie tworzy holdów ani rezerwacji i nie wypisuje klucza API.
+Po uzupełnieniu samego klucza pokaże bezpiecznie listę nazw i ID wydarzeń widocznych na koncie,
+co ułatwia wpisanie trzech zmiennych `CALCOM_EVENT_TYPE_*`.
+Jeżeli kontrola przejdzie, ustaw `CALENDAR_PROVIDER=calcom` i uruchom aplikację ponownie.
 
 Jeżeli klient nie podaje e-maila podczas rozmowy, `CALCOM_DEFAULT_ATTENDEE_EMAIL` jest wymagany przez obecną integrację. Docelowo warto zamiast adresu technicznego zbierać e-mail albo użyć skonfigurowanego procesu follow-up.
 

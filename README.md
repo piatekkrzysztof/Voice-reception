@@ -259,6 +259,7 @@ Node.js 24 and PostgreSQL in containers, automatic HTTPS through Caddy. The full
 procedure — DNS, secrets, readiness, migrations, backup — is in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Connecting the voice provider is in
 [`docs/VOICE_PILOT.md`](docs/VOICE_PILOT.md); once `.env` is filled,
+`npm run calcom:check` validates the calendar configuration without creating a booking, and
 `npm run voice:sync` creates or updates the Vapi assistant.
 
 ---
@@ -275,6 +276,7 @@ src/voice/service.mjs            booking logic and Tool Gateway
 src/voice/database.mjs           transactional SQLite model
 src/voice/postgres-database.mjs  PostgreSQL, pool, transactions
 src/voice/calendar.mjs           local calendar and Cal.com
+src/voice/calcom-preflight.mjs   read-only Cal.com account and availability check
 src/voice/assistant-config.mjs   Vapi assistant configuration
 migrations/                      versioned PostgreSQL schema
 scripts/                         migrations, provider sync, backup and restore drill
