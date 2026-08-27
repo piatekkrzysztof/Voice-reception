@@ -22,6 +22,11 @@ export function loadConfig(overrides = {}) {
   const calendarProvider = env.CALENDAR_PROVIDER || (env.CALCOM_API_KEY ? 'calcom' : 'local');
   const databaseUrl = env.DATABASE_URL || '';
   const pilotMode = boolean(env.PILOT_MODE);
+  const publicBaseUrl = (
+    env.PUBLIC_BASE_URL ||
+    env.RENDER_EXTERNAL_URL ||
+    `http://127.0.0.1:${env.PORT || 4173}`
+  ).replace(/\/$/, '');
 
   return {
     projectRoot,
@@ -29,10 +34,7 @@ export function loadConfig(overrides = {}) {
     production,
     port: Number(env.PORT || 4173),
     host: env.HOST || '127.0.0.1',
-    publicBaseUrl: (env.PUBLIC_BASE_URL || `http://127.0.0.1:${env.PORT || 4173}`).replace(
-      /\/$/,
-      '',
-    ),
+    publicBaseUrl,
     pilotMode,
     allowLocalProviders: boolean(env.ALLOW_LOCAL_PROVIDERS),
     database: {
@@ -50,7 +52,7 @@ export function loadConfig(overrides = {}) {
       loginMaxAttempts: Number(env.VOICE_LOGIN_MAX_ATTEMPTS || 5),
       loginWindowMinutes: Number(env.VOICE_LOGIN_WINDOW_MINUTES || 15),
       setupToken: env.VOICE_SETUP_TOKEN || '',
-      secureCookies: /^https:\/\//.test(env.PUBLIC_BASE_URL || ''),
+      secureCookies: /^https:\/\//.test(publicBaseUrl),
     },
     operations: {
       maxInflight: Number(env.HTTP_MAX_INFLIGHT || 25),

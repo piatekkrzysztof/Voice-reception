@@ -33,6 +33,25 @@ test('kontrolowane demo produkcyjne akceptuje PostgreSQL i lokalne adaptery po j
   assert.deepEqual(validateConfig(config), []);
 });
 
+test('Render przekazuje publiczny adres HTTPS bez ręcznego wpisywania domeny', () => {
+  const config = loadConfig({
+    NODE_ENV: 'production',
+    PUBLIC_BASE_URL: '',
+    RENDER_EXTERNAL_URL: 'https://voice-reception.onrender.com/',
+    DATABASE_URL: 'postgresql://voice:secret@database.example.com:5432/voice_reception',
+    DATABASE_SSL_MODE: 'verify-full',
+    VOICE_SLOT_SECRET: 'slot-secret-with-more-than-32-characters',
+    VOICE_SETUP_TOKEN: 'setup-token-with-more-than-32-characters',
+    VOICE_PROVIDER: 'local',
+    CALENDAR_PROVIDER: 'local',
+    ALLOW_LOCAL_PROVIDERS: 'true',
+  });
+
+  assert.equal(config.publicBaseUrl, 'https://voice-reception.onrender.com');
+  assert.equal(config.auth.secureCookies, true);
+  assert.deepEqual(validateConfig(config), []);
+});
+
 test('tryb prawdziwego pilota wymaga integracji, retencji i bezpiecznego alertu', () => {
   const config = loadConfig({
     PILOT_MODE: 'true',
