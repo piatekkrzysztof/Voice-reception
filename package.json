@@ -10,6 +10,7 @@
     "test": "node --test",
     "reset": "node scripts/reset-local.mjs",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "calcom:check": "node --env-file-if-exists=.env scripts/check-calcom.mjs",
     "voice:sync": "node --env-file-if-exists=.env scripts/sync-vapi-assistant.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
