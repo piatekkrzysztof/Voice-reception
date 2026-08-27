@@ -18,6 +18,11 @@
 - walidacja produkcyjna blokująca HTTP, SQLite i słabe sekrety,
 - automatyczny HTTPS, HSTS i prywatna sieć kontenerów,
 - PostgreSQL z parametryzowanymi zapytaniami, pulą i migracjami pod blokadą,
+- strukturalne logi z automatyczną redakcją PII i sekretów,
+- alerty bez danych rozmówcy, z deduplikacją i ograniczeniem częstotliwości,
+- limit równoległych operacji i kontrolowane `503` przy przeciążeniu,
+- automatyczna anonimizacja danych po okresie retencji,
+- backup `pg_dump` z sumą SHA-256 i odtworzeniem do izolowanej bazy kontrolnej,
 - brak sekretów w repozytorium.
 
 W trybie Vapi wymagane są zarówno `VOICE_WEBHOOK_SECRET`, jak i `VAPI_SERVER_CREDENTIAL_ID`. Agent nie może ogłosić rezerwacji, dopóki `confirm_booking` nie zwróci sukcesu.
@@ -27,8 +32,8 @@ W trybie Vapi wymagane są zarówno `VOICE_WEBHOOK_SECRET`, jak i `VAPI_SERVER_C
 - zewnętrzny secrets manager zamiast pliku środowiskowego,
 - RLS oraz testy izolacji tenantów na poziomie bazy,
 - centralny IdP, MFA i rozdzielenie ról dla wielu użytkowników,
-- szyfrowanie, backup i sprawdzony restore,
-- OpenTelemetry, alerty i redakcja danych w logach,
+- zewnętrzny secrets manager oraz szyfrowanie backupu poza serwerem,
+- centralny monitoring/OpenTelemetry i skonfigurowany dyżur alertowy,
 - DPA, lista subprocessorów i polityka retencji,
 - analiza podstawy prawnej przed ewentualnym nagrywaniem,
 - niezależne testy bezpieczeństwa.

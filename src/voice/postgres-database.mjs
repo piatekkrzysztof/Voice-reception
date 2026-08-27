@@ -455,6 +455,65 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
     return event;
   }
 
+  async function listEvents(
+    currentTenant = tenantId,
+    sinceAt = new Date(0).toISOString(),
+    limit = 5_000,
+  ) {
+    const result = await pool.query(
+      `SELECT id, tenant_id, call_id, type, detail, created_at FROM voice_events
+      WHERE tenant_id = $1 AND created_at >= $2 ORDER BY created_at DESC LIMIT $3`,
+      [currentTenant, sinceAt, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      callId: row.call_id,
+      type: row.type,
+      detail: row.detail || {},
+      createdAt: iso(row.created_at),
+    }));
+  }
+
+  async function applyRetention({ now, callsBefore, bookingsBefore, eventsBefore, holdsBefore }) {
+    return transaction(pool, async (client) => {
+      const expiredHolds = await expireHolds(now, client);
+      const anonymizedCalls = await client.query(
+        `UPDATE voice_calls SET caller = NULL, summary = NULL, updated_at = $1
+        WHERE started_at < $2 AND (caller IS NOT NULL OR summary IS NOT NULL)`,
+        [now, callsBefore],
+      );
+      const anonymizedBookings = await client.query(
+        `UPDATE voice_bookings SET customer_name = '[usunięto po retencji]', phone = '',
+        email = NULL, updated_at = $1 WHERE start_at < $2
+        AND (customer_name != '[usunięto po retencji]' OR phone != '' OR email IS NOT NULL)`,
+        [now, bookingsBefore],
+      );
+      const deletedEvents = await client.query('DELETE FROM voice_events WHERE created_at < $1', [
+        eventsBefore,
+      ]);
+      const deletedSessions = await client.query(
+        'DELETE FROM voice_sessions WHERE expires_at <= $1',
+        [now],
+      );
+      const deletedHolds = await client.query(
+        `DELETE FROM voice_holds h WHERE h.expires_at < $1
+        AND h.status IN ('expired','released')
+        AND NOT EXISTS (SELECT 1 FROM voice_bookings b WHERE b.hold_id = h.id)`,
+        [holdsBefore],
+      );
+      return {
+        ranAt: now,
+        expiredHolds,
+        anonymizedCalls: anonymizedCalls.rowCount,
+        anonymizedBookings: anonymizedBookings.rowCount,
+        deletedEvents: deletedEvents.rowCount,
+        deletedSessions: deletedSessions.rowCount,
+        deletedHolds: deletedHolds.rowCount,
+      };
+    });
+  }
+
   async function stats(currentTenant = tenantId) {
     const callsResult = await pool.query(
       `SELECT COUNT(*) AS calls, COALESCE(SUM(cost),0) AS cost,
@@ -583,6 +642,8 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
     upsertCall,
     listCalls,
     recordEvent,
+    listEvents,
+    applyRetention,
     stats,
     expireHolds,
     adminCount,

@@ -38,6 +38,48 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  backup:
+    image: postgres:17-alpine
+    profiles: ['ops']
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PGHOST: database
+      PGPORT: 5432
+      PGUSER: voice
+      PGDATABASE: voice_reception
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Ustaw POSTGRES_PASSWORD w .env.production}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup-postgres.sh:/scripts/backup-postgres.sh:ro
+    entrypoint: ['/bin/sh', '/scripts/backup-postgres.sh']
+    security_opt:
+      - no-new-privileges:true
+
+  backup-verify:
+    image: postgres:17-alpine
+    profiles: ['ops']
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PGHOST: database
+      PGPORT: 5432
+      PGUSER: voice
+      PGDATABASE: voice_reception
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Ustaw POSTGRES_PASSWORD w .env.production}
+      BACKUP_DIR: /backups
+      BACKUP_FILE: ${BACKUP_FILE:-}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/verify-postgres-backup.sh:/scripts/verify-postgres-backup.sh:ro
+    entrypoint: ['/bin/sh', '/scripts/verify-postgres-backup.sh']
+    security_opt:
+      - no-new-privileges:true
+
   app:
     build:
       context: .
@@ -64,6 +106,18 @@ services:
       VOICE_SLOT_SECRET: ${VOICE_SLOT_SECRET:?Ustaw losowy VOICE_SLOT_SECRET w .env.production}
       VOICE_SETUP_TOKEN: ${VOICE_SETUP_TOKEN:?Ustaw losowy VOICE_SETUP_TOKEN w .env.production}
       VOICE_SESSION_HOURS: ${VOICE_SESSION_HOURS:-8}
+      PILOT_MODE: ${PILOT_MODE:-false}
+      HTTP_MAX_INFLIGHT: ${HTTP_MAX_INFLIGHT:-25}
+      HTTP_REQUEST_TIMEOUT_MS: ${HTTP_REQUEST_TIMEOUT_MS:-15000}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_BEARER_TOKEN: ${ALERT_WEBHOOK_BEARER_TOKEN:-}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-10}
+      DATA_RETENTION_ENABLED: ${DATA_RETENTION_ENABLED:-true}
+      DATA_RETENTION_INTERVAL_MINUTES: ${DATA_RETENTION_INTERVAL_MINUTES:-360}
+      DATA_RETENTION_CALLS_DAYS: ${DATA_RETENTION_CALLS_DAYS:-30}
+      DATA_RETENTION_BOOKINGS_DAYS: ${DATA_RETENTION_BOOKINGS_DAYS:-365}
+      DATA_RETENTION_EVENTS_DAYS: ${DATA_RETENTION_EVENTS_DAYS:-90}
+      DATA_RETENTION_HOLDS_DAYS: ${DATA_RETENTION_HOLDS_DAYS:-7}
       VOICE_PROVIDER: ${VOICE_PROVIDER:-local}
       CALENDAR_PROVIDER: ${CALENDAR_PROVIDER:-local}
       ALLOW_LOCAL_PROVIDERS: ${ALLOW_LOCAL_PROVIDERS:-true}
@@ -73,8 +127,14 @@ services:
       VAPI_ASSISTANT_ID: ${VAPI_ASSISTANT_ID:-}
       VAPI_PHONE_NUMBER_ID: ${VAPI_PHONE_NUMBER_ID:-}
       VAPI_SERVER_CREDENTIAL_ID: ${VAPI_SERVER_CREDENTIAL_ID:-}
+      VAPI_MODEL_PROVIDER: ${VAPI_MODEL_PROVIDER:-openai}
+      VAPI_MODEL: ${VAPI_MODEL:-gpt-4.1-mini}
+      VAPI_VOICE_PROVIDER: ${VAPI_VOICE_PROVIDER:-}
+      VAPI_VOICE_ID: ${VAPI_VOICE_ID:-}
       CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_TIMEOUT_MS: ${CALCOM_TIMEOUT_MS:-8000}
       CALCOM_DEFAULT_ATTENDEE_EMAIL: ${CALCOM_DEFAULT_ATTENDEE_EMAIL:-}
+      CALCOM_RESERVE_SLOTS: ${CALCOM_RESERVE_SLOTS:-false}
       CALCOM_EVENT_TYPE_KOLORYZACJA: ${CALCOM_EVENT_TYPE_KOLORYZACJA:-}
       CALCOM_EVENT_TYPE_STRZYZENIE: ${CALCOM_EVENT_TYPE_STRZYZENIE:-}
       CALCOM_EVENT_TYPE_KONSULTACJA: ${CALCOM_EVENT_TYPE_KONSULTACJA:-}

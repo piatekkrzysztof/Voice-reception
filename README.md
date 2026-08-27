@@ -5,7 +5,7 @@ and cannot double-book, because the booking is a database transaction rather tha
 promise made in conversation.
 
 ![node](https://img.shields.io/badge/node-24-339933)
-![tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-30%20passing-brightgreen)
 ![deps](https://img.shields.io/badge/runtime%20deps-1-blue)
 ![status](https://img.shields.io/badge/status-pilot%20ready-yellow)
 ![licence](https://img.shields.io/badge/licence-source--available-lightgrey)
@@ -30,7 +30,7 @@ caller loses cleanly.
 ![Operations console](docs/obrazy/konsola-gotowosc.webp)
 
 <sub>The console after login: adapter readiness, the transactional booking rehearsal, and
-the pilot gate — "connection to the market, 1 of 4 ready". You cannot point a phone number
+the pilot gate — "connection to the market, 1 of 5 ready". You cannot point a phone number
 at it until that gate is green.</sub>
 
 ---
@@ -126,7 +126,7 @@ which one it is talking to.
 
 **A readiness gate before the phone rings.** The console refuses to look production-ready
 when it is not. It shows each dependency — database, telephony, calendar, public edge,
-webhook auth — as ready or not, and counts how many of the four steps to "connected to the
+webhook auth and pilot operations — as ready or not, and counts how many of the five steps to "connected to the
 market" are done. Pointing a real number at a half-configured system is how a business
 loses a customer at eight in the morning.
 
@@ -137,6 +137,14 @@ and calls are not recorded — only the final report is stored.
 **No default credentials, ever.** First run creates the owner account interactively. If
 that first run happens over a public address it additionally requires a long random
 `VOICE_SETUP_TOKEN`, so an exposed instance cannot be claimed by whoever finds it first.
+
+**A separate pilot gate.** `PILOT_MODE=true` refuses to start with local providers,
+disabled retention or an insecure/missing alert receiver. Runtime metrics combine HTTP
+counters with durable tool events in the database, while logs and alerts redact PII.
+
+**Restore is tested, not assumed.** The operations profile creates a PostgreSQL custom
+dump with a checksum and restores it into a disposable verification database. The restore
+drill cannot overwrite the live database by design and also runs in CI.
 
 ---
 
@@ -151,14 +159,14 @@ The runner is Node's built-in `node --test`. No Jest, no Vitest, no configuratio
 
 ### Current results
 
-|                        |                                                                          |
-| ---------------------- | ------------------------------------------------------------------------ |
-| Tests                  | **20 passing**, 0 failing (measured with `TEST_DATABASE_URL` set)        |
-| Without a database URL | 14 passing, 1 skipped — the PostgreSQL race test                         |
-| Runtime                | ~1.2 s                                                                   |
-| CI                     | SQLite suite · real PostgreSQL transaction test · production image build |
-| Coverage               | not measured                                                             |
-| Lint / format          | not configured                                                           |
+|                        |                                                                   |
+| ---------------------- | ----------------------------------------------------------------- |
+| Tests                  | **30 passing**, 0 failing (measured with `TEST_DATABASE_URL` set) |
+| Without a database URL | 29 passing, 1 skipped — the PostgreSQL contract test              |
+| Runtime                | ~1.5 s                                                            |
+| CI                     | lint · audit · SQLite · PostgreSQL · backup/restore · image build |
+| Coverage               | measured in CI; threshold pending                                 |
+| Lint / format          | ESLint and Prettier gate every change                             |
 
 They cover environment and readiness rules, booking rules, hold expiry, the double-booking
 race under a real transaction, the Cal.com v2 adapter contract (including the pinned slots
@@ -201,17 +209,17 @@ krzysztof@agencjasm-art.pl rather than opening a public issue.
 ## Known limitations
 
 **The pilot boundary.** PostgreSQL is ready for a single deployment and separates records
-by `tenant_id`. Before this is a real multi-tenant SaaS it needs row-level security, a
-central identity provider with MFA and roles, an event queue, monitoring, automated
-backup, a retention policy and a tenant configuration screen. None of those exist yet, and
-`tenant_id` on its own is not isolation.
+by `tenant_id`. The controlled pilot now has metrics, redacted alerts, retention and a
+tested backup path. Before this is a real multi-tenant SaaS it still needs row-level
+security, a central identity provider with MFA and roles, an event queue, central
+monitoring and a tenant configuration screen. `tenant_id` on its own is not isolation.
 
 Beyond that:
 
-- **20 tests is a floor, not a suite.** A repeated webhook, a call dropped between hold
+- **30 tests is a floor, not a suite.** A repeated webhook, a call dropped between hold
   and confirm, and a late confirmation of an abandoned hold are now covered. Still missing:
-  contract tests against a recorded voice session, and behaviour under retry or overload
-  when the external calendar is slow or refusing.
+  contract tests against a recorded voice session and reconciliation when Cal.com accepts
+  a booking but the HTTP response is lost.
 - **No coverage threshold yet.** ESLint, Prettier and `npm audit` gate every pull request,
   and coverage is measured with PostgreSQL attached — but only reported, not enforced.
   The threshold will be set from the first measured run rather than guessed.
@@ -221,23 +229,22 @@ Beyond that:
   practice.
 - **Two commits.** The history carries no decision trail. From here on, changes go through
   an issue, a branch and a pull request.
-- **No latency measurement.** A voice agent has a hard latency budget — a caller notices a
-  second of silence — and it has never been measured.
+- **Latency measures tools, not speech.** The console now reports p95 for persisted tool
+  calls, but time to first spoken response still requires measurement on real Vapi calls.
 
 ---
 
 ## Roadmap
 
-**Now — the tests these failure modes deserve.** Contract tests against recorded voice
-sessions, and behaviour under retry or overload when the external calendar is slow or
-refusing. A coverage threshold, set from the measured number.
+**Now — connect the market.** Deploy one isolated instance, configure the monitoring
+receiver and off-server backup copy, then connect one Cal.com account and one Vapi number.
 
 **Next — latency and cost as numbers.** Time to first response and p95 across the whole
 `availability → hold → confirm` path, plus the cost of one booked call. A voice product
 lives or dies on both.
 
-**Then — the pilot boundary,** in the order the items block a second customer: row-level
-security, backups with a tested restore, retention policy, monitoring.
+**Then — the SaaS boundary,** in the order the items block a second customer: row-level
+security, central identity and roles, tenant configuration, queueing and billing.
 
 ---
 
@@ -263,12 +270,15 @@ public/                          the operations console (one page, no framework)
 server.mjs                       HTTP API and Vapi webhook
 src/config.mjs                   environment and readiness rules
 src/auth.mjs                     scrypt passwords, sessions, rate limiting
+src/operations.mjs               metrics, overload protection, redacted alerts
 src/voice/service.mjs            booking logic and Tool Gateway
 src/voice/database.mjs           transactional SQLite model
 src/voice/postgres-database.mjs  PostgreSQL, pool, transactions
 src/voice/calendar.mjs           local calendar and Cal.com
 src/voice/assistant-config.mjs   Vapi assistant configuration
 migrations/                      versioned PostgreSQL schema
+scripts/                         migrations, provider sync, backup and restore drill
+backups/                         ignored local destination for PostgreSQL dumps
 test/                            domain and contract tests
 docs/                            architecture, deployment, security, pilot
 ```

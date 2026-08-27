@@ -96,25 +96,54 @@ function createCalComCalendar(config) {
   ) {
     if (!cal.apiKey && authenticated)
       throw voiceError('Brak CALCOM_API_KEY.', 'CALCOM_NOT_CONFIGURED', 503);
-    const response = await fetch(`${cal.apiUrl}${path}`, {
-      method,
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        'content-type': 'application/json',
-        'cal-api-version': version,
-        ...(authenticated && cal.apiKey ? { authorization: `Bearer ${cal.apiKey}` } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+    let response;
+    try {
+      response = await fetch(`${cal.apiUrl}${path}`, {
+        method,
+        signal: AbortSignal.timeout(cal.timeoutMs || 8_000),
+        headers: {
+          'content-type': 'application/json',
+          'cal-api-version': version,
+          ...(authenticated && cal.apiKey ? { authorization: `Bearer ${cal.apiKey}` } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    } catch (cause) {
+      const timedOut = cause?.name === 'TimeoutError' || cause?.name === 'AbortError';
+      throw voiceError(
+        timedOut
+          ? 'Cal.com nie odpowiedział w dozwolonym czasie.'
+          : 'Nie udało się połączyć z Cal.com.',
+        timedOut ? 'CALCOM_TIMEOUT' : 'CALCOM_UNAVAILABLE',
+        503,
+        cause,
+      );
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.status === 'error') {
-      const detail = payload.error?.message || payload.message || `HTTP ${response.status}`;
-      throw voiceError(
-        `Cal.com odrzucił operację: ${detail}`,
-        response.status === 409 ? 'CALENDAR_CONFLICT' : 'CALCOM_ERROR',
-        response.status,
+      const code =
+        response.status === 409
+          ? 'CALENDAR_CONFLICT'
+          : response.status === 429
+            ? 'CALCOM_RATE_LIMITED'
+            : response.status >= 500
+              ? 'CALCOM_UNAVAILABLE'
+              : 'CALCOM_ERROR';
+      const failure = voiceError(
+        response.status === 409
+          ? 'Termin został zajęty w kalendarzu.'
+          : response.status === 429
+            ? 'Cal.com chwilowo ograniczył liczbę operacji.'
+            : response.status >= 500
+              ? 'Cal.com jest chwilowo niedostępny.'
+              : 'Cal.com odrzucił operację.',
+        code,
+        response.status === 429 || response.status >= 500 ? 503 : response.status,
         payload,
       );
+      const retryAfter = Number.parseInt(response.headers.get('retry-after') || '', 10);
+      if (Number.isFinite(retryAfter)) failure.retryAfter = retryAfter;
+      throw failure;
     }
     return payload.data ?? payload;
   }

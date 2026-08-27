@@ -102,8 +102,8 @@ export function buildVapiAssistantConfig(config) {
     firstMessageMode: 'assistant-speaks-first',
     firstMessageInterruptionsEnabled: true,
     model: {
-      provider: process.env.VAPI_MODEL_PROVIDER || 'openai',
-      model: process.env.VAPI_MODEL || 'gpt-4.1-mini',
+      provider: voice.vapi.modelProvider,
+      model: voice.vapi.model,
       temperature: 0.2,
       messages: [
         {
@@ -141,10 +141,10 @@ export function buildVapiAssistantConfig(config) {
       },
     },
   };
-  if (process.env.VAPI_VOICE_PROVIDER && process.env.VAPI_VOICE_ID) {
+  if (voice.vapi.voiceProvider && voice.vapi.voiceId) {
     assistant.voice = {
-      provider: process.env.VAPI_VOICE_PROVIDER,
-      voiceId: process.env.VAPI_VOICE_ID,
+      provider: voice.vapi.voiceProvider,
+      voiceId: voice.vapi.voiceId,
     };
   }
   return assistant;

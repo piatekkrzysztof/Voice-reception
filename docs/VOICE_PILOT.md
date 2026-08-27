@@ -31,11 +31,12 @@ Uruchom aplikację i wykonaj próbę operacyjną w panelu Voice. Sprawdź dostę
 ```dotenv
 CALENDAR_PROVIDER=calcom
 CALCOM_API_KEY=
-CALCOM_EVENT_TYPE_COLORING=
-CALCOM_EVENT_TYPE_HAIRCUT=
-CALCOM_EVENT_TYPE_CONSULTATION=
+CALCOM_EVENT_TYPE_KOLORYZACJA=
+CALCOM_EVENT_TYPE_STRZYZENIE=
+CALCOM_EVENT_TYPE_KONSULTACJA=
 CALCOM_DEFAULT_ATTENDEE_EMAIL=
 CALCOM_RESERVE_SLOTS=true
+CALCOM_TIMEOUT_MS=8000
 ```
 
 Jeżeli klient nie podaje e-maila podczas rozmowy, `CALCOM_DEFAULT_ATTENDEE_EMAIL` jest wymagany przez obecną integrację. Docelowo warto zamiast adresu technicznego zbierać e-mail albo użyć skonfigurowanego procesu follow-up.
@@ -82,7 +83,29 @@ Przy pierwszym uruchomieniu skrypt wypisze `VAPI_ASSISTANT_ID`. Wpisz go do `.en
 
 Konfiguracja asystenta zawiera cztery narzędzia bookingowe, wyłączone nagrywanie, analizę strukturalną, komunikat o AI i opcjonalny transfer do człowieka.
 
-## 5. Test odbiorczy
+## 5. Bramka operacyjna
+
+Przed skierowaniem prawdziwych rozmów włącz rygorystyczny tryb pilota:
+
+```dotenv
+PILOT_MODE=true
+ALLOW_LOCAL_PROVIDERS=false
+ALERT_WEBHOOK_URL=https://...
+DATA_RETENTION_ENABLED=true
+```
+
+`PILOT_MODE` blokuje start, jeśli aplikacja nie używa PostgreSQL, HTTPS, Vapi i Cal.com albo nie ma retencji i bezpiecznego odbiornika alertów. Po zalogowaniu metryki ostatnich 24 godzin są dostępne pod `/api/ops/metrics`. Endpoint nie ujawnia danych klienta i wymaga sesji właściciela.
+
+Wykonaj backup oraz próbne odtworzenie przed pierwszą rozmową:
+
+```bash
+docker compose --env-file .env.production --profile ops run --rm backup
+docker compose --env-file .env.production --profile ops run --rm backup-verify
+```
+
+Drugi proces odtwarza dane wyłącznie do tymczasowej bazy kontrolnej i usuwa ją po sprawdzeniu. Nie nadpisuje bazy produkcyjnej.
+
+## 6. Test odbiorczy
 
 Pilot można uznać za technicznie podłączony dopiero, gdy przejdą wszystkie scenariusze:
 
@@ -96,7 +119,11 @@ Pilot można uznać za technicznie podłączony dopiero, gdy przejdą wszystkie 
 - prośba o człowieka uruchamia transfer,
 - raport końca rozmowy pokazuje właściwy wynik bez audio i pełnej transkrypcji,
 - polskie nazwiska, numery telefonu, cisza i przerwanie wypowiedzi są obsługiwane akceptowalnie.
+- timeout i limit zapytań Cal.com kończą narzędzie błędem zamiast potwierdzeniem,
+- alert o błędzie dociera bez nazwiska, telefonu, e-maila i treści rozmowy,
+- przeciążenie zwraca kontrolowane `503 SERVER_BUSY`, a nie zawiesza proces,
+- backup przechodzi próbę odtworzenia.
 
-## 6. Granica pilota
+## 7. Granica pilota
 
-Ten etap jest przeznaczony do kontrolowanego pilota jednej firmy. Przed sprzedażą self-service wielu klientom potrzebne są PostgreSQL/RLS, logowanie i role, panel konfiguracji usług, kolejka zdarzeń, SMS, monitoring, backup, billing oraz formalna polityka retencji danych.
+Ten etap jest przeznaczony do kontrolowanego pilota jednej firmy na osobnej instalacji. Aplikacja ma PostgreSQL, logowanie właściciela, metryki, alerty, retencję i sprawdzalny backup. Przed sprzedażą self-service wielu klientom nadal potrzebne są RLS, IdP/MFA i role, panel konfiguracji usług, kolejka zdarzeń, SMS, billing, centralny monitoring oraz formalnie zatwierdzona polityka retencji danych.

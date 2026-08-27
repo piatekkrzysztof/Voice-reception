@@ -86,6 +86,47 @@ test('adapter Cal.com tworzy booking w API 2026-02-25 bez omijania konfliktów',
   }
 });
 
+test('timeout Cal.com jest błędem kontrolowanym i nie udaje dostępności', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new DOMException('Timed out', 'TimeoutError');
+  };
+  try {
+    const calendar = createCalendar(voiceConfig());
+    await assert.rejects(
+      calendar.availability({
+        date: '2030-01-02',
+        service: { name: 'Strzyżenie', durationMinutes: 60, externalEventTypeId: 88 },
+      }),
+      (error) => error.code === 'CALCOM_TIMEOUT' && error.status === 503,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('limit Cal.com zwraca kontrolowane przeciążenie z Retry-After', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ status: 'error', message: 'Too many requests' }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'retry-after': '7' },
+    });
+  try {
+    const calendar = createCalendar(voiceConfig());
+    await assert.rejects(
+      calendar.availability({
+        date: '2030-01-02',
+        service: { name: 'Strzyżenie', durationMinutes: 60, externalEventTypeId: 88 },
+      }),
+      (error) =>
+        error.code === 'CALCOM_RATE_LIMITED' && error.status === 503 && error.retryAfter === 7,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentialId', () => {
   const config = {
     publicBaseUrl: 'https://voice.example.com',
@@ -93,7 +134,13 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
       business: { name: 'Atelier Północ' },
       timezone: 'Europe/Warsaw',
       humanTransferNumber: '+48123456789',
-      vapi: { serverCredentialId: 'cred-123' },
+      vapi: {
+        serverCredentialId: 'cred-123',
+        modelProvider: 'openai',
+        model: 'gpt-4.1-mini',
+        voiceProvider: '',
+        voiceId: '',
+      },
     },
   };
   const assistant = buildVapiAssistantConfig(config);

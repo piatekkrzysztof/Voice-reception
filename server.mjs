@@ -1,11 +1,12 @@
 import http from 'node:http';
 import { createReadStream, existsSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
 import { assertValidConfig, loadConfig } from './src/config.mjs';
 import { createAuthService } from './src/auth.mjs';
 import { createVoiceService, verifyVapiWebhook } from './src/voice/service.mjs';
+import { createLogger, createOperations } from './src/operations.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(root, 'public');
@@ -67,25 +68,53 @@ function applySecurityHeaders(res, config) {
 export async function createApp(options = {}) {
   const config = options.config || loadConfig(options.env || {});
   assertValidConfig(config);
+  const logger = options.logger || createLogger();
+  const operations =
+    options.operations ||
+    createOperations({
+      config,
+      logger,
+      ...(options.alertFetch ? { fetchImpl: options.alertFetch } : {}),
+    });
   const voiceDatabasePath = options.voiceDbPath || config.voice.databasePath;
   const voiceService = await createVoiceService({
     config,
     state: { calls: [] },
     databasePath: voiceDatabasePath,
+    operations,
   });
   const authService = createAuthService({ database: voiceService.database, config });
 
   const server = http.createServer(async (req, res) => {
+    let request;
+    let route = 'unknown';
     try {
       applySecurityHeaders(res, config);
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      const route = url.pathname;
+      route = url.pathname;
+      request = operations.beginRequest({
+        method: req.method,
+        route,
+        suppliedRequestId: req.headers['x-request-id'],
+        protectedRoute: route.startsWith('/api/') && !['/api/health', '/api/ready'].includes(route),
+      });
+      res.setHeader('x-request-id', request.requestId);
+      if (!request.accepted) {
+        operations.notify({ severity: 'error', code: 'HTTP_OVERLOAD', component: 'http' });
+        return requestError(
+          res,
+          503,
+          'Serwer jest chwilowo zajęty. Spróbuj ponownie.',
+          'SERVER_BUSY',
+          { 'retry-after': '1' },
+        );
+      }
 
       if (route === '/api/health' && req.method === 'GET') {
         return json(res, 200, {
           status: 'ok',
           service: 'voice-reception',
-          version: '1.1.0',
+          version: '1.2.0',
           time: new Date().toISOString(),
         });
       }
@@ -98,7 +127,13 @@ export async function createApp(options = {}) {
             time: new Date().toISOString(),
           });
         } catch (error) {
-          console.error('Readiness check failed', error);
+          logger.error('readiness.failed', { requestId: request.requestId, error });
+          operations.notify({
+            severity: 'critical',
+            code: 'READINESS_FAILED',
+            component: 'database',
+            requestId: request.requestId,
+          });
           return json(res, 503, { status: 'not-ready', database: config.database.provider });
         }
       }
@@ -132,6 +167,15 @@ export async function createApp(options = {}) {
       }
       if (route === '/api/auth/me' && req.method === 'GET') {
         return json(res, 200, { user: await authService.requireUser(req) });
+      }
+      if (route === '/api/ops/metrics' && req.method === 'GET') {
+        await authService.requireUser(req);
+        return json(res, 200, operations.snapshot(await voiceService.operationalMetrics()));
+      }
+      if (route === '/api/ops/retention' && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
+        return json(res, 200, { retention: await voiceService.runRetention() });
       }
       if (route === '/api/voice' && req.method === 'GET') {
         await authService.requireUser(req);
@@ -193,7 +237,8 @@ export async function createApp(options = {}) {
         return requestError(res, 405, 'Metoda jest niedozwolona.', 'METHOD_NOT_ALLOWED');
       const requested = route === '/' ? '/index.html' : route;
       let filePath = resolve(publicDir, `.${requested}`);
-      if (!filePath.startsWith(`${publicDir}\\`) && filePath !== join(publicDir, 'index.html')) {
+      const relativePath = relative(publicDir, filePath);
+      if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
         return requestError(res, 403, 'Niedozwolona ścieżka.', 'FORBIDDEN');
       }
       if (!existsSync(filePath)) filePath = join(publicDir, 'index.html');
@@ -206,23 +251,41 @@ export async function createApp(options = {}) {
       createReadStream(filePath).pipe(res);
     } catch (caught) {
       const status = caught.status || (caught instanceof SyntaxError ? 400 : 500);
-      if (status >= 500) console.error(caught);
+      if (status >= 500) {
+        logger.error('http.request_failed', {
+          requestId: request?.requestId,
+          method: req.method,
+          route,
+          error: caught,
+        });
+        operations.notify({
+          severity: 'error',
+          code: caught.code || 'HTTP_5XX',
+          component: 'http',
+          requestId: request?.requestId,
+        });
+      }
       const headers = caught.retryAfter ? { 'retry-after': String(caught.retryAfter) } : {};
       const message =
         status >= 500 ? 'Wystąpił nieoczekiwany błąd serwera.' : caught.message || 'Błąd żądania.';
       if (!res.headersSent)
         return requestError(res, status, message, caught.code || 'SERVER_ERROR', headers);
       res.end();
+    } finally {
+      if (request?.accepted) request.finish(res.statusCode || 500);
     }
   });
+  server.requestTimeout = config.operations.requestTimeoutMs;
+  server.headersTimeout = Math.max(config.operations.requestTimeoutMs + 1_000, 5_000);
+  server.keepAliveTimeout = 5_000;
 
   let closePromise;
   function closeResources() {
-    closePromise ||= Promise.resolve(voiceService.close());
+    closePromise ||= Promise.all([voiceService.close(), operations.close()]);
     return closePromise;
   }
   server.on('close', () => {
-    closeResources().catch((error) => console.error('Database shutdown failed', error));
+    closeResources().catch((error) => logger.error('shutdown.resources_failed', { error }));
   });
   async function close() {
     if (server.listening) {
@@ -232,12 +295,13 @@ export async function createApp(options = {}) {
     }
     await closeResources();
   }
-  return { server, voiceDatabasePath, voiceService, authService, close, config };
+  return { server, voiceDatabasePath, voiceService, authService, operations, close, config };
 }
 
 async function start() {
   const config = loadConfig();
-  const app = await createApp({ config });
+  const logger = createLogger();
+  const app = await createApp({ config, logger });
   const { server, voiceDatabasePath } = app;
   await new Promise((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
@@ -246,18 +310,19 @@ async function start() {
       resolveListen();
     });
   });
-  console.log(`Voice Reception działa: http://${config.host}:${config.port}`);
-  console.log(
-    `Voice DB: ${config.database.provider === 'postgres' ? 'PostgreSQL' : voiceDatabasePath}`,
-  );
+  logger.info('service.started', {
+    address: `http://${config.host}:${config.port}`,
+    database: config.database.provider === 'postgres' ? 'postgres' : voiceDatabasePath,
+    pilotMode: config.pilotMode,
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`Odebrano ${signal}. Zamykanie połączeń…`);
+    logger.info('service.shutdown_started', { signal });
     const timeout = setTimeout(() => {
-      console.error('Przekroczono czas łagodnego zamknięcia.');
+      logger.error('service.shutdown_timeout', { signal });
       process.exitCode = 1;
     }, 10_000);
     timeout.unref();
@@ -268,10 +333,10 @@ async function start() {
     }
   };
   process.once('SIGINT', () => {
-    shutdown('SIGINT').catch(console.error);
+    shutdown('SIGINT').catch((error) => logger.error('service.shutdown_failed', { error }));
   });
   process.once('SIGTERM', () => {
-    shutdown('SIGTERM').catch(console.error);
+    shutdown('SIGTERM').catch((error) => logger.error('service.shutdown_failed', { error }));
   });
 }
 

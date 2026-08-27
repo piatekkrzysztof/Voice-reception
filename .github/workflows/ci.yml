@@ -76,6 +76,21 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://voice:voice_ci_password@127.0.0.1:5432/voice_reception_test
 
+      - name: Backup and restore drill
+        run: |
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=voice \
+            -e PGDATABASE=voice_reception_test -e PGPASSWORD=voice_ci_password \
+            -v "$PWD/backups:/backups" \
+            -v "$PWD/scripts:/scripts:ro" \
+            postgres:17-alpine /bin/sh /scripts/backup-postgres.sh
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=voice \
+            -e PGDATABASE=voice_reception_test -e PGPASSWORD=voice_ci_password \
+            -v "$PWD/backups:/backups" \
+            -v "$PWD/scripts:/scripts:ro" \
+            postgres:17-alpine /bin/sh /scripts/verify-postgres-backup.sh
+
       # Pokrycie mierzymy TYLKO tutaj, bo dopiero z PostgreSQL wykonuje sie
       # adapter bazy produkcyjnej -- bez niego ten plik ma 3,8% i kazda liczba
       # zbiorcza jest zmyslona.

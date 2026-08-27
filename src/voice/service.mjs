@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { createVoiceDatabase } from './database-factory.mjs';
 import { createCalendar } from './calendar.mjs';
 import { publicVoiceConfig } from '../config.mjs';
+import { percentile95 } from '../operations.mjs';
 
 function error(message, code, status = 400) {
   const value = new Error(message);
@@ -90,7 +92,7 @@ export function verifyVapiWebhook(headers, webhookSecret) {
   );
 }
 
-export async function createVoiceService({ config, state, databasePath }) {
+export async function createVoiceService({ config, state, databasePath, operations }) {
   const voice = config.voice;
   const tenantId = voice.business.tenantId;
   const db = await createVoiceDatabase({
@@ -101,6 +103,39 @@ export async function createVoiceService({ config, state, databasePath }) {
   });
   await db.configureEventTypes(voice.calcom.eventTypes, tenantId);
   const calendar = createCalendar(voice);
+  const retention = config.operations.retention;
+
+  function dateBefore(days) {
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1_000).toISOString();
+  }
+
+  async function runRetention() {
+    if (!retention.enabled) return null;
+    try {
+      const result = await db.applyRetention({
+        now: new Date().toISOString(),
+        callsBefore: dateBefore(retention.callsDays),
+        bookingsBefore: dateBefore(retention.bookingsDays),
+        eventsBefore: dateBefore(retention.eventsDays),
+        holdsBefore: dateBefore(retention.holdsDays),
+      });
+      operations?.setRetentionResult(result);
+      return result;
+    } catch (caught) {
+      operations?.notify({ severity: 'error', code: 'RETENTION_FAILED', component: 'database' });
+      throw caught;
+    }
+  }
+
+  let retentionTimer = null;
+  if (retention.enabled) {
+    await runRetention();
+    retentionTimer = setInterval(
+      () => runRetention().catch(() => {}),
+      retention.intervalMinutes * 60_000,
+    );
+    retentionTimer.unref();
+  }
 
   async function serviceBy(value) {
     const normalized = String(value || '')
@@ -276,8 +311,14 @@ export async function createVoiceService({ config, state, databasePath }) {
       await db.recordEvent({
         tenantId,
         type: 'booking.failed',
-        detail: { holdId, code: caught.code || 'UNKNOWN', message: caught.message },
+        detail: { holdId, code: caught.code || 'UNKNOWN' },
       });
+      if ((caught.status || 500) >= 500)
+        operations?.notify({
+          severity: 'critical',
+          code: caught.code || 'BOOKING_FAILED',
+          component: 'booking',
+        });
       throw caught;
     }
   }
@@ -299,12 +340,44 @@ export async function createVoiceService({ config, state, databasePath }) {
     return { cancelled: true, booking: cancelled };
   }
 
+  async function operationalMetrics(windowHours = 24) {
+    const sinceAt = new Date(Date.now() - windowHours * 60 * 60 * 1_000).toISOString();
+    const [events, recentCalls] = await Promise.all([
+      db.listEvents(tenantId, sinceAt, 5_000),
+      db.listCalls(tenantId, 2_000),
+    ]);
+    const toolEvents = events.filter((event) =>
+      ['tool.succeeded', 'tool.failed'].includes(event.type),
+    );
+    const latencies = toolEvents
+      .map((event) => Number(event.detail?.durationMs))
+      .filter(Number.isFinite);
+    const callsInWindow = recentCalls.filter((call) => call.startedAt >= sinceAt);
+    const succeeded = toolEvents.filter((event) => event.type === 'tool.succeeded').length;
+    return {
+      windowHours,
+      sinceAt,
+      toolCalls: toolEvents.length,
+      toolFailures: toolEvents.length - succeeded,
+      toolSuccessPercent: toolEvents.length
+        ? Math.round((succeeded / toolEvents.length) * 100)
+        : 100,
+      p95ToolLatencyMs: percentile95(latencies),
+      bookingFailures: events.filter((event) => event.type === 'booking.failed').length,
+      callsEnded: callsInWindow.filter((call) => call.endedAt).length,
+      transfers: callsInWindow.filter((call) => call.transferred).length,
+      cost: Number(callsInWindow.reduce((sum, call) => sum + Number(call.cost || 0), 0).toFixed(4)),
+      eventLimitReached: events.length === 5_000,
+    };
+  }
+
   async function dashboard() {
-    const [calls, bookings, totals, services] = await Promise.all([
+    const [calls, bookings, totals, services, operational] = await Promise.all([
       db.listCalls(tenantId),
       db.listBookings(tenantId),
       db.stats(tenantId),
       db.listServices(tenantId),
+      operationalMetrics(),
     ]);
     const integration = publicVoiceConfig(config);
     return {
@@ -319,11 +392,12 @@ export async function createVoiceService({ config, state, databasePath }) {
         transfers: Number(totals.transfers || 0),
         averageDurationSeconds: Math.round(Number(totals.averageDuration || 0)),
         totalCost: Number(totals.cost || 0),
-        toolSuccess: 100,
+        toolSuccess: operational.toolSuccessPercent,
         aiDisclosure: totals.calls
           ? Math.round((Number(totals.disclosed || 0) / Number(totals.calls)) * 100)
           : 100,
-        p95Latency: calendar.live ? null : 0.04,
+        p95Latency:
+          operational.p95ToolLatencyMs == null ? null : operational.p95ToolLatencyMs / 1_000,
       },
     };
   }
@@ -357,6 +431,7 @@ export async function createVoiceService({ config, state, databasePath }) {
       const results = [];
       for (const toolCall of calls) {
         const name = toolName(toolCall);
+        const started = performance.now();
         try {
           const result = await handleToolCall(toolCall, callId);
           results.push({
@@ -368,7 +443,11 @@ export async function createVoiceService({ config, state, databasePath }) {
             tenantId,
             callId,
             type: 'tool.succeeded',
-            detail: { name, toolCallId: toolCall.id },
+            detail: {
+              name,
+              toolCallId: toolCall.id,
+              durationMs: Math.round(performance.now() - started),
+            },
           });
         } catch (caught) {
           results.push({
@@ -384,8 +463,19 @@ export async function createVoiceService({ config, state, databasePath }) {
             tenantId,
             callId,
             type: 'tool.failed',
-            detail: { name, toolCallId: toolCall.id, code: caught.code || 'TOOL_ERROR' },
+            detail: {
+              name,
+              toolCallId: toolCall.id,
+              code: caught.code || 'TOOL_ERROR',
+              durationMs: Math.round(performance.now() - started),
+            },
           });
+          if ((caught.status || 500) >= 500)
+            operations?.notify({
+              severity: 'error',
+              code: caught.code || 'TOOL_ERROR',
+              component: `tool.${name}`,
+            });
         }
       }
       return { results };
@@ -458,8 +548,13 @@ export async function createVoiceService({ config, state, databasePath }) {
     confirmBooking,
     cancelBooking,
     handleVapiMessage,
+    operationalMetrics,
+    runRetention,
     config: () => publicVoiceConfig(config),
-    close: () => db.close(),
+    close: async () => {
+      if (retentionTimer) clearInterval(retentionTimer);
+      await db.close();
+    },
     ready: () => db.health(),
     database: db,
   };

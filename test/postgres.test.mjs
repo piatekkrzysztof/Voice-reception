@@ -62,6 +62,34 @@ test(
       assert.equal((await database.findBookingByIdempotency(idempotencyKey)).id, booking.id);
       assert.equal(await database.health(), true);
 
+      await database.upsertCall({
+        externalId: `old-call-${tenantId}`,
+        tenantId,
+        startedAt: '2020-01-01T10:00:00.000Z',
+        endedAt: '2020-01-01T10:02:00.000Z',
+        caller: '+48600100200',
+        summary: 'Dane do usunięcia',
+        outcome: 'BOOKED',
+      });
+      await database.recordEvent({ tenantId, type: 'old.event' });
+      const retention = await database.applyRetention({
+        now: '2040-01-01T00:00:00.000Z',
+        callsBefore: '2039-01-01T00:00:00.000Z',
+        bookingsBefore: '2039-01-01T00:00:00.000Z',
+        eventsBefore: '2039-01-01T00:00:00.000Z',
+        holdsBefore: '2039-01-01T00:00:00.000Z',
+      });
+      const retainedCall = (await database.listCalls(tenantId)).find(
+        (item) => item.externalId === `old-call-${tenantId}`,
+      );
+      const retainedBooking = await database.findBookingByIdempotency(idempotencyKey);
+      assert.equal(retainedCall.caller, null);
+      assert.equal(retainedCall.summary, null);
+      assert.equal(retainedBooking.customer, '[usunięto po retencji]');
+      assert.equal(retainedBooking.phone, '');
+      assert.ok(retention.deletedEvents >= 1);
+      assert.equal(Number((await database.stats(tenantId)).bookings), 1);
+
       const otherTenantId = `contract-${crypto.randomBytes(5).toString('hex')}`;
       const otherTenantDatabase = await createPostgresDatabase({
         config: {

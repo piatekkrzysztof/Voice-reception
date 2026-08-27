@@ -199,6 +199,12 @@ function renderMetrics(metrics, integration) {
     ['ROZMOWY', metrics.calls, 'zapisane raporty'],
     ['REZERWACJE', metrics.bookings, 'aktywnie potwierdzone'],
     ['TRANSFER', metrics.transfers, 'przekazane człowiekowi'],
+    ['NARZĘDZIA 24H', `${metrics.toolSuccess}%`, 'poprawne wywołania'],
+    [
+      'P95 NARZĘDZI',
+      metrics.p95Latency == null ? '—' : `${Number(metrics.p95Latency).toFixed(2)} s`,
+      'opóźnienie z trwałych zdarzeń'
+    ],
     ['PROVIDER', provider, `${Number(metrics.totalCost || 0).toFixed(2)} zł kosztu`]
   ];
   $('#metric-grid').innerHTML = cards.map(([label, value, detail]) => `
@@ -211,7 +217,8 @@ function renderReadiness(data) {
     { ready: integrations.database.ready, title: 'Booking Service', copy: 'Transakcje, holdy i ochrona konfliktów.' },
     { ready: data.integration.calendarProvider === 'calcom' && integrations.calendar.ready, title: 'Cal.com', copy: 'Prawdziwe sloty i rezerwacje w kalendarzu.' },
     { ready: data.integration.provider === 'vapi' && integrations.voice.ready, title: 'Vapi + numer', copy: 'Asystent przypisany do linii telefonicznej.' },
-    { ready: integrations.publicWebhook.ready && integrations.webhookAuth.ready, title: 'Publiczny edge', copy: 'HTTPS i uwierzytelniony webhook.' }
+    { ready: integrations.publicWebhook.ready && integrations.webhookAuth.ready, title: 'Publiczny edge', copy: 'HTTPS i uwierzytelniony webhook.' },
+    { ready: integrations.operations.ready, title: 'Operacje pilota', copy: 'Retencja danych i bezpieczny kanał alertów.' }
   ];
   const readyCount = items.filter((item) => item.ready).length;
   $('#readiness-score').textContent = `${readyCount} / ${items.length} GOTOWE`;

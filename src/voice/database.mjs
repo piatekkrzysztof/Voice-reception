@@ -227,6 +227,7 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       if (!slotIsFree({ tenantId: currentTenant, serviceId, startAt, endAt })) {
         const error = new Error('Termin nie jest już dostępny.');
         error.code = 'SLOT_UNAVAILABLE';
+        error.status = 409;
         throw error;
       }
       const hold = {
@@ -278,6 +279,7 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       if (!hold || hold.status !== 'active') {
         const error = new Error('Rezerwacja tymczasowa wygasła lub została wykorzystana.');
         error.code = 'HOLD_INVALID';
+        error.status = 409;
         throw error;
       }
       db.prepare(
@@ -344,6 +346,7 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       if (!current || current.status !== 'confirming') {
         const error = new Error('Nie można potwierdzić tej blokady terminu.');
         error.code = 'HOLD_INVALID';
+        error.status = 409;
         throw error;
       }
       const now = new Date().toISOString();
@@ -371,6 +374,7 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       } catch (cause) {
         const error = new Error('Termin został zajęty w trakcie potwierdzania.');
         error.code = 'BOOKING_CONFLICT';
+        error.status = 409;
         error.cause = cause;
         throw error;
       }
@@ -483,6 +487,68 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     return event;
   }
 
+  function listEvents(
+    currentTenant = tenantId,
+    sinceAt = new Date(0).toISOString(),
+    limit = 5_000,
+  ) {
+    return db
+      .prepare(
+        `SELECT id, tenant_id AS tenantId, call_id AS callId, type, detail,
+        created_at AS createdAt FROM voice_events
+        WHERE tenant_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(currentTenant, sinceAt, limit)
+      .map((row) => {
+        try {
+          return { ...row, detail: JSON.parse(row.detail || '{}') };
+        } catch {
+          return { ...row, detail: {} };
+        }
+      });
+  }
+
+  function applyRetention({ now, callsBefore, bookingsBefore, eventsBefore, holdsBefore }) {
+    return transaction(() => {
+      const expiredHolds = expireHolds(now);
+      const anonymizedCalls = db
+        .prepare(
+          `UPDATE voice_calls SET caller = NULL, summary = NULL, updated_at = ?
+          WHERE started_at < ? AND (caller IS NOT NULL OR summary IS NOT NULL)`,
+        )
+        .run(now, callsBefore).changes;
+      const anonymizedBookings = db
+        .prepare(
+          `UPDATE voice_bookings SET customer_name = '[usunięto po retencji]', phone = '',
+          email = NULL, updated_at = ? WHERE start_at < ?
+          AND (customer_name != '[usunięto po retencji]' OR phone != '' OR email IS NOT NULL)`,
+        )
+        .run(now, bookingsBefore).changes;
+      const deletedEvents = db
+        .prepare('DELETE FROM voice_events WHERE created_at < ?')
+        .run(eventsBefore).changes;
+      const deletedSessions = db
+        .prepare('DELETE FROM voice_sessions WHERE expires_at <= ?')
+        .run(now).changes;
+      const deletedHolds = db
+        .prepare(
+          `DELETE FROM voice_holds WHERE expires_at < ?
+          AND status IN ('expired','released')
+          AND NOT EXISTS (SELECT 1 FROM voice_bookings b WHERE b.hold_id = voice_holds.id)`,
+        )
+        .run(holdsBefore).changes;
+      return {
+        ranAt: now,
+        expiredHolds,
+        anonymizedCalls,
+        anonymizedBookings,
+        deletedEvents,
+        deletedSessions,
+        deletedHolds,
+      };
+    });
+  }
+
   function stats(currentTenant = tenantId) {
     const calls = db
       .prepare(
@@ -583,6 +649,8 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     upsertCall,
     listCalls,
     recordEvent,
+    listEvents,
+    applyRetention,
     stats,
     expireHolds,
     adminCount,

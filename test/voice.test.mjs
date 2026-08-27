@@ -60,11 +60,33 @@ test('health endpoint identyfikuje samodzielny produkt Voice Reception', async (
   assert.equal(body.service, 'voice-reception');
 });
 
+test('frontend serwuje assety niezależnie od separatora ścieżek systemu', async () => {
+  const response = await fetch(`${baseUrl}/app.js`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /javascript/);
+  assert.match(await response.text(), /NARZĘDZIA 24H/);
+});
+
 test('readiness potwierdza dostęp do aktywnej bazy danych', async () => {
   const { response, body } = await request('/api/ready');
   assert.equal(response.status, 200);
   assert.equal(body.status, 'ready');
   assert.equal(body.database, 'sqlite');
+});
+
+test('metryki operacyjne wymagają sesji i zwracają identyfikowalne żądania', async () => {
+  const unauthenticated = await request('/api/ops/metrics', {}, false);
+  assert.equal(unauthenticated.response.status, 401);
+
+  const requestId = '00000000-0000-4000-8000-000000000001';
+  const { response, body } = await request('/api/ops/metrics', {
+    headers: { 'x-request-id': requestId },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-request-id'), requestId);
+  assert.ok(body.http.requests >= 1);
+  assert.equal(body.persistent.windowHours, 24);
+  assert.equal(typeof body.persistent.toolSuccessPercent, 'number');
 });
 
 test('konsola i dane klientów wymagają zalogowanej sesji', async () => {

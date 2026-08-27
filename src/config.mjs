@@ -21,6 +21,7 @@ export function loadConfig(overrides = {}) {
   const voiceProvider = env.VOICE_PROVIDER || (env.VAPI_API_KEY ? 'vapi' : 'local');
   const calendarProvider = env.CALENDAR_PROVIDER || (env.CALCOM_API_KEY ? 'calcom' : 'local');
   const databaseUrl = env.DATABASE_URL || '';
+  const pilotMode = boolean(env.PILOT_MODE);
 
   return {
     projectRoot,
@@ -32,6 +33,7 @@ export function loadConfig(overrides = {}) {
       /\/$/,
       '',
     ),
+    pilotMode,
     allowLocalProviders: boolean(env.ALLOW_LOCAL_PROVIDERS),
     database: {
       provider: databaseUrl ? 'postgres' : 'sqlite',
@@ -49,6 +51,24 @@ export function loadConfig(overrides = {}) {
       loginWindowMinutes: Number(env.VOICE_LOGIN_WINDOW_MINUTES || 15),
       setupToken: env.VOICE_SETUP_TOKEN || '',
       secureCookies: /^https:\/\//.test(env.PUBLIC_BASE_URL || ''),
+    },
+    operations: {
+      maxInflight: Number(env.HTTP_MAX_INFLIGHT || 25),
+      requestTimeoutMs: Number(env.HTTP_REQUEST_TIMEOUT_MS || 15_000),
+      alerts: {
+        webhookUrl: env.ALERT_WEBHOOK_URL || '',
+        bearerToken: env.ALERT_WEBHOOK_BEARER_TOKEN || '',
+        cooldownMinutes: Number(env.ALERT_COOLDOWN_MINUTES || 10),
+        timeoutMs: Number(env.ALERT_TIMEOUT_MS || 3_000),
+      },
+      retention: {
+        enabled: boolean(env.DATA_RETENTION_ENABLED, production),
+        intervalMinutes: Number(env.DATA_RETENTION_INTERVAL_MINUTES || 360),
+        callsDays: Number(env.DATA_RETENTION_CALLS_DAYS || 30),
+        bookingsDays: Number(env.DATA_RETENTION_BOOKINGS_DAYS || 365),
+        eventsDays: Number(env.DATA_RETENTION_EVENTS_DAYS || 90),
+        holdsDays: Number(env.DATA_RETENTION_HOLDS_DAYS || 7),
+      },
     },
     voice: {
       databasePath: resolve(projectRoot, env.VOICE_DATABASE_PATH || 'data/voice.sqlite'),
@@ -70,10 +90,15 @@ export function loadConfig(overrides = {}) {
         phoneNumberId: env.VAPI_PHONE_NUMBER_ID || '',
         serverCredentialId: env.VAPI_SERVER_CREDENTIAL_ID || '',
         apiUrl: (env.VAPI_API_URL || 'https://api.vapi.ai').replace(/\/$/, ''),
+        modelProvider: env.VAPI_MODEL_PROVIDER || 'openai',
+        model: env.VAPI_MODEL || 'gpt-4.1-mini',
+        voiceProvider: env.VAPI_VOICE_PROVIDER || '',
+        voiceId: env.VAPI_VOICE_ID || '',
       },
       calcom: {
         apiKey: env.CALCOM_API_KEY || '',
         apiUrl: (env.CALCOM_API_URL || 'https://api.cal.com').replace(/\/$/, ''),
+        timeoutMs: Number(env.CALCOM_TIMEOUT_MS || 8_000),
         defaultAttendeeEmail: env.CALCOM_DEFAULT_ATTENDEE_EMAIL || '',
         reserveSlots: boolean(env.CALCOM_RESERVE_SLOTS),
         eventTypes: {
@@ -96,10 +121,64 @@ export function validateConfig(config) {
     issues.push('DATABASE_URL musi być prawidłowym adresem PostgreSQL.');
   if (!['disable', 'no-verify', 'verify-full'].includes(config.database.sslMode))
     issues.push('DATABASE_SSL_MODE musi mieć wartość disable, no-verify albo verify-full.');
+  if (!Number.isInteger(config.operations.maxInflight) || config.operations.maxInflight < 1)
+    issues.push('HTTP_MAX_INFLIGHT musi być dodatnią liczbą całkowitą.');
+  if (
+    !Number.isInteger(config.operations.requestTimeoutMs) ||
+    config.operations.requestTimeoutMs < 1_000
+  )
+    issues.push('HTTP_REQUEST_TIMEOUT_MS musi mieć co najmniej 1000 ms.');
+  if (
+    config.operations.alerts.webhookUrl &&
+    !/^https?:\/\//.test(config.operations.alerts.webhookUrl)
+  )
+    issues.push('ALERT_WEBHOOK_URL musi być prawidłowym adresem HTTP(S).');
+  if (
+    !Number.isInteger(config.operations.alerts.cooldownMinutes) ||
+    config.operations.alerts.cooldownMinutes < 0
+  )
+    issues.push('ALERT_COOLDOWN_MINUTES nie może być ujemny.');
+  if (!Number.isInteger(config.voice.calcom.timeoutMs) || config.voice.calcom.timeoutMs < 500)
+    issues.push('CALCOM_TIMEOUT_MS musi mieć co najmniej 500 ms.');
+  for (const [name, value] of Object.entries({
+    DATA_RETENTION_INTERVAL_MINUTES: config.operations.retention.intervalMinutes,
+    DATA_RETENTION_CALLS_DAYS: config.operations.retention.callsDays,
+    DATA_RETENTION_BOOKINGS_DAYS: config.operations.retention.bookingsDays,
+    DATA_RETENTION_EVENTS_DAYS: config.operations.retention.eventsDays,
+    DATA_RETENTION_HOLDS_DAYS: config.operations.retention.holdsDays,
+  })) {
+    if (!Number.isInteger(value) || value < 1)
+      issues.push(`${name} musi być dodatnią liczbą całkowitą.`);
+  }
+
+  if (config.pilotMode) {
+    if (!config.production) issues.push('PILOT_MODE wymaga NODE_ENV=production.');
+    if (config.allowLocalProviders)
+      issues.push('PILOT_MODE nie pozwala na ALLOW_LOCAL_PROVIDERS=true.');
+    if (config.voice.provider !== 'vapi' || config.voice.calendarProvider !== 'calcom')
+      issues.push('PILOT_MODE wymaga prawdziwych integracji Vapi i Cal.com.');
+    if (config.voice.webhookSecret.length < 32)
+      issues.push('PILOT_MODE wymaga VOICE_WEBHOOK_SECRET o długości co najmniej 32 znaków.');
+    if (!config.voice.humanTransferNumber)
+      issues.push('PILOT_MODE wymaga VOICE_HUMAN_TRANSFER_NUMBER do eskalacji rozmowy.');
+    if (!config.voice.calcom.defaultAttendeeEmail)
+      issues.push('PILOT_MODE wymaga CALCOM_DEFAULT_ATTENDEE_EMAIL dla rozmów bez e-maila.');
+    if (!config.voice.calcom.reserveSlots)
+      issues.push('PILOT_MODE wymaga CALCOM_RESERVE_SLOTS=true.');
+    if (!config.operations.retention.enabled)
+      issues.push('PILOT_MODE wymaga DATA_RETENTION_ENABLED=true.');
+    if (!/^https:\/\//.test(config.operations.alerts.webhookUrl))
+      issues.push('PILOT_MODE wymaga ALERT_WEBHOOK_URL używającego HTTPS.');
+  }
 
   if (config.production) {
     if (!/^https:\/\//.test(config.publicBaseUrl))
       issues.push('PUBLIC_BASE_URL musi używać HTTPS w środowisku produkcyjnym.');
+    if (
+      config.operations.alerts.webhookUrl &&
+      !/^https:\/\//.test(config.operations.alerts.webhookUrl)
+    )
+      issues.push('ALERT_WEBHOOK_URL musi używać HTTPS w środowisku produkcyjnym.');
     if (config.database.provider !== 'postgres')
       issues.push('Środowisko produkcyjne wymaga DATABASE_URL do PostgreSQL.');
     if (
@@ -154,6 +233,7 @@ export function publicVoiceConfig(config) {
   return {
     business: voice.business,
     timezone: voice.timezone,
+    pilotMode: config.pilotMode,
     provider: voice.provider,
     calendarProvider: voice.calendarProvider,
     webhookUrl: `${config.publicBaseUrl}/api/webhooks/vapi`,
@@ -194,6 +274,15 @@ export function publicVoiceConfig(config) {
         ready:
           voice.provider === 'local' ||
           Boolean(voice.webhookSecret && voice.vapi.serverCredentialId),
+      },
+      operations: {
+        name: 'Operacje pilota',
+        detail:
+          config.operations.retention.enabled && config.operations.alerts.webhookUrl
+            ? 'Retencja i alerty aktywne'
+            : 'Wymaga retencji i odbiornika alertów',
+        mode: config.operations.retention.enabled ? 'retention' : 'local',
+        ready: Boolean(config.operations.retention.enabled && config.operations.alerts.webhookUrl),
       },
     },
   };
