@@ -185,7 +185,6 @@ function createCalComCalendar(config) {
         body: {
           eventTypeId: service.externalEventTypeId,
           slotStart: startAt,
-          slotDuration: service.durationMinutes,
           reservationDuration: config.holdMinutes,
         },
       });
