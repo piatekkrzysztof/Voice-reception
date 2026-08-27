@@ -49,6 +49,34 @@ test('adapter Cal.com używa wersji API slotów 2024-09-04', async () => {
   }
 });
 
+test('adapter Cal.com rezerwuje stały slot bez parametru zmiennej długości', async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (url, options) => {
+    captured = { url: String(url), options, body: JSON.parse(options.body) };
+    return Response.json(
+      { status: 'success', data: { reservationUid: 'reservation-1' } },
+      { status: 201 },
+    );
+  };
+  try {
+    const config = voiceConfig();
+    config.calcom.reserveSlots = true;
+    const calendar = createCalendar(config);
+    const uid = await calendar.reserve({
+      service: { externalEventTypeId: 88, durationMinutes: 60 },
+      startAt: '2030-01-02T09:00:00.000Z',
+    });
+    assert.equal(uid, 'reservation-1');
+    assert.equal(captured.options.headers['cal-api-version'], '2024-09-04');
+    assert.equal(captured.body.eventTypeId, 88);
+    assert.equal(captured.body.reservationDuration, 5);
+    assert.equal(captured.body.slotDuration, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('adapter Cal.com tworzy booking w API 2026-02-25 bez omijania konfliktów', async () => {
   const originalFetch = globalThis.fetch;
   let captured;

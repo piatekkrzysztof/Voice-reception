@@ -52,6 +52,10 @@ test('preflight wskazuje wszystkie brakujące dane bez wysyłania żądania', as
   assert.ok(result.issues.some((issue) => issue.includes('CALCOM_DEFAULT_ATTENDEE_EMAIL')));
   assert.ok(result.issues.some((issue) => issue.includes('CALCOM_RESERVE_SLOTS')));
   assert.equal(result.issues.filter((issue) => issue.includes('Uzupełnij ID')).length, 3);
+  assert.equal(
+    result.issues.some((issue) => issue.includes('null min')),
+    false,
+  );
 });
 
 test('po podaniu klucza preflight pokazuje ID typów wydarzeń przed pełnym mapowaniem', async () => {

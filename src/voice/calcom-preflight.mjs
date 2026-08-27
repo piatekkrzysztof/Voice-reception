@@ -162,7 +162,7 @@ export async function checkCalcomConfiguration({
   for (const service of services) {
     if (Number.isInteger(service.eventTypeId) && service.eventTypeId > 0 && !service.found)
       issues.push(`${service.service}: skonfigurowane ID nie należy do tego konta Cal.com.`);
-    else if (!service.durationMatches)
+    else if (service.found && !service.durationMatches)
       issues.push(
         `${service.service}: czas w Cal.com (${service.durationMinutes} min) powinien wynosić ${service.expectedDurationMinutes} min.`,
       );
