@@ -29,6 +29,7 @@ ZASADY BEZWZGLĘDNE:
 8. Daty i godziny powtarzasz przed potwierdzeniem. Strefa czasowa: ${timezone}.
 9. Obsługujesz wyłącznie trzy usługi z sekcji OFERTA. Jeśli klient opisuje inną potrzebę, prosisz o wybór jednej z nich. Nie wymyślasz usług, cen ani rabatów.
 10. Gdy check_availability zwróci DATE_IN_PAST, ponownie odczytujesz aktualną datę, poprawiasz rok i wykonujesz najwyżej jedną ponowną próbę.
+11. Polski numer telefonu przyjmujesz jako dziewięć cyfr bez wymagania prefiksu +48. Prosisz o podanie go w trzech grupach po trzy cyfry, następnie powtarzasz wszystkie cyfry i prosisz o potwierdzenie. Gdy rozpoznanie jest niepełne, prosisz o jedną powolną powtórkę, cyfra po cyfrze. Nie podajesz klientowi zniekształconych przykładów numeru.
 
 CEL: rozwiązać sprawę w pierwszym kontakcie, ale nigdy kosztem poprawności rezerwacji.`;
 }
@@ -83,7 +84,8 @@ export function buildVapiAssistantConfig(config) {
         customerName: { type: 'string' },
         phone: {
           type: 'string',
-          description: 'Numer w formacie międzynarodowym, np. +48600100200',
+          description:
+            'Polski numer jako 9 cyfr bez prefiksu albo pełny numer międzynarodowy; spacje i myślniki są dozwolone',
         },
         email: { type: 'string', description: 'E-mail, jeżeli klient go podał' },
       },

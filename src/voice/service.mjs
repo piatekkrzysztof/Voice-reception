@@ -57,6 +57,16 @@ function dateInTimeZone(date, timeZone) {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+export function normalizePhoneNumber(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (/^\d{9}$/.test(digits)) return `+48${digits}`;
+  if (/^48\d{9}$/.test(digits)) return `+${digits}`;
+  if (raw.startsWith('+') && /^\d{8,15}$/.test(digits)) return `+${digits}`;
+  if (/^00\d{8,15}$/.test(digits)) return `+${digits.slice(2)}`;
+  return null;
+}
+
 function toolArguments(toolCall) {
   const raw =
     toolCall.arguments ??
@@ -270,7 +280,8 @@ export async function createVoiceService({ config, state, databasePath, operatio
     const existing = await db.findBookingByIdempotency(idempotencyKey);
     if (existing) return { confirmed: true, booking: existing, idempotentReplay: true };
     if (!customerName?.trim()) throw error('Imię klienta jest wymagane.', 'CUSTOMER_NAME_REQUIRED');
-    if (!/^\+?[0-9][0-9\s-]{7,18}$/.test(phone || ''))
+    const normalizedPhone = normalizePhoneNumber(phone);
+    if (!normalizedPhone)
       throw error('Numer telefonu ma nieprawidłowy format.', 'PHONE_INVALID');
     const hold = await db.claimHold(holdId, tenantId);
     const service = await serviceBy(hold.serviceId);
@@ -281,12 +292,12 @@ export async function createVoiceService({ config, state, databasePath, operatio
       providerBooking = await calendar.book({
         hold,
         service,
-        customer: { name: customerName.trim(), phone, email },
+        customer: { name: customerName.trim(), phone: normalizedPhone, email },
       });
       const booking = await db.confirmHold({
         hold,
         customerName: customerName.trim(),
-        phone,
+        phone: normalizedPhone,
         email,
         providerUid: providerBooking.uid,
         idempotencyKey,

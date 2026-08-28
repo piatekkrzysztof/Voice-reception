@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCalendar } from '../src/voice/calendar.mjs';
 import { buildVapiAssistantConfig } from '../src/voice/assistant-config.mjs';
+import { normalizePhoneNumber } from '../src/voice/service.mjs';
 
 function voiceConfig() {
   return {
@@ -16,6 +17,13 @@ function voiceConfig() {
     },
   };
 }
+
+test('polski numer krajowy jest normalizowany bez wymagania dyktowania +48', () => {
+  assert.equal(normalizePhoneNumber('600 100 200'), '+48600100200');
+  assert.equal(normalizePhoneNumber('48 600-100-200'), '+48600100200');
+  assert.equal(normalizePhoneNumber('+49 151 23456789'), '+4915123456789');
+  assert.equal(normalizePhoneNumber('123'), null);
+});
 
 test('adapter Cal.com używa wersji API slotów 2024-09-04', async () => {
   const originalFetch = globalThis.fetch;
@@ -177,6 +185,7 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   assert.match(assistant.firstMessage, /automatyczna asystentka AI/i);
   assert.match(assistant.model.messages[0].content, /\{\{"now" \| date:/);
   assert.match(assistant.model.messages[0].content, /Konsultacja \(30 min\)/);
+  assert.match(assistant.model.messages[0].content, /dziewięć cyfr bez wymagania prefiksu \+48/);
   assert.equal(assistant.server.credentialId, 'cred-123');
   const functionTools = assistant.model.tools.filter((tool) => tool.type === 'function');
   assert.equal(functionTools.length, 4);
@@ -186,5 +195,10 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
     'Strzyżenie',
     'Koloryzacja',
   ]);
+  assert.match(
+    functionTools.find((tool) => tool.function.name === 'confirm_booking').function.parameters
+      .properties.phone.description,
+    /9 cyfr bez prefiksu/,
+  );
   assert.ok(assistant.model.tools.some((tool) => tool.type === 'transferCall'));
 });
