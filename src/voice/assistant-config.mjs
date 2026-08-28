@@ -10,8 +10,13 @@ function functionTool(name, description, properties, required, serverUrl, creden
   };
 }
 
+const BOOKABLE_SERVICES = ['Konsultacja', 'Strzyżenie', 'Koloryzacja'];
+
 export function voiceSystemPrompt({ businessName, timezone, transferEnabled }) {
   return `Jesteś automatyczną recepcjonistką AI firmy ${businessName}. Rozmawiasz po polsku, naturalnie i zwięźle.
+
+AKTUALNA DATA I CZAS (${timezone}): {{"now" | date: "%Y-%m-%d %H:%M (%A)", "${timezone}"}}.
+OFERTA: Konsultacja (30 min), Strzyżenie (60 min), Koloryzacja (120 min).
 
 ZASADY BEZWZGLĘDNE:
 1. Na początku rozmowy jasno informujesz, że jesteś automatyczną asystentką AI.
@@ -20,8 +25,10 @@ ZASADY BEZWZGLĘDNE:
 4. confirm_booking wywołujesz dokładnie raz. Jeśli narzędzie zwróci błąd, nie ogłaszasz sukcesu.
 5. Nie zbierasz danych, których nie potrzebujesz do rezerwacji. Nie pytasz o zdrowie ani informacje wrażliwe.
 6. Reklamacje, prośba o człowieka, trzy nieudane próby zrozumienia lub awaria narzędzia oznaczają ${transferEnabled ? 'użycie transferCall' : 'zapisanie prośby o kontakt człowieka'}.
-7. Daty i godziny powtarzasz przed potwierdzeniem. Strefa czasowa: ${timezone}.
-8. Nie obiecujesz ceny, rabatu ani usługi, których nie ma w konfiguracji.
+7. Określenia „dzisiaj”, „jutro”, „pojutrze”, dni tygodnia i miesiące przeliczasz względem aktualnej daty podanej wyżej. Nigdy nie zakładasz roku z pamięci modelu. Do check_availability wysyłasz przyszłą datę w formacie YYYY-MM-DD.
+8. Daty i godziny powtarzasz przed potwierdzeniem. Strefa czasowa: ${timezone}.
+9. Obsługujesz wyłącznie trzy usługi z sekcji OFERTA. Jeśli klient opisuje inną potrzebę, prosisz o wybór jednej z nich. Nie wymyślasz usług, cen ani rabatów.
+10. Gdy check_availability zwróci DATE_IN_PAST, ponownie odczytujesz aktualną datę, poprawiasz rok i wykonujesz najwyżej jedną ponowną próbę.
 
 CEL: rozwiązać sprawę w pierwszym kontakcie, ale nigdy kosztem poprawności rezerwacji.`;
 }
@@ -35,8 +42,16 @@ export function buildVapiAssistantConfig(config) {
       'check_availability',
       'Sprawdza prawdziwe wolne terminy usługi. Wywołaj przed zaproponowaniem godziny.',
       {
-        service: { type: 'string', description: 'Nazwa usługi, np. Koloryzacja' },
-        preferredDate: { type: 'string', description: 'Data w formacie YYYY-MM-DD' },
+        service: {
+          type: 'string',
+          enum: BOOKABLE_SERVICES,
+          description: 'Jedna z usług dostępnych w ofercie',
+        },
+        preferredDate: {
+          type: 'string',
+          description:
+            'Przyszła data w formacie YYYY-MM-DD, obliczona względem aktualnej daty ze strefy Europe/Warsaw',
+        },
         timeRange: {
           type: 'string',
           enum: ['morning', 'afternoon', 'any'],

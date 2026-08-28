@@ -175,9 +175,16 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   };
   const assistant = buildVapiAssistantConfig(config);
   assert.match(assistant.firstMessage, /automatyczna asystentka AI/i);
+  assert.match(assistant.model.messages[0].content, /\{\{"now" \| date:/);
+  assert.match(assistant.model.messages[0].content, /Konsultacja \(30 min\)/);
   assert.equal(assistant.server.credentialId, 'cred-123');
   const functionTools = assistant.model.tools.filter((tool) => tool.type === 'function');
   assert.equal(functionTools.length, 4);
   assert.ok(functionTools.every((tool) => tool.server.credentialId === 'cred-123'));
+  assert.deepEqual(functionTools[0].function.parameters.properties.service.enum, [
+    'Konsultacja',
+    'Strzyżenie',
+    'Koloryzacja',
+  ]);
   assert.ok(assistant.model.tools.some((tool) => tool.type === 'transferCall'));
 });
