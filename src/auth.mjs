@@ -104,6 +104,10 @@ function isLoopback(address = '') {
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
 }
 
+function isLocalSetupAllowed(req, config) {
+  return !config.production && isLoopback(req.socket.remoteAddress);
+}
+
 function publicUser(session) {
   return session
     ? { id: session.adminId || session.id, email: session.email, role: session.role }
@@ -162,7 +166,7 @@ export function createAuthService({ database, config }) {
   }
 
   function setupAllowed(req, input) {
-    if (isLoopback(req.socket.remoteAddress)) return true;
+    if (isLocalSetupAllowed(req, config)) return true;
     if (!config.auth.setupToken) return false;
     return safeEqual(
       req.headers['x-voice-setup-token'] || input.setupToken || '',
@@ -261,12 +265,13 @@ export function createAuthService({ database, config }) {
   async function status(req) {
     const setupRequired = (await database.adminCount()) === 0;
     const user = await currentUser(req);
+    const localSetupAllowed = setupRequired && isLocalSetupAllowed(req, config);
     return {
       setupRequired,
       authenticated: Boolean(user),
       user,
-      localSetupAllowed: setupRequired && isLoopback(req.socket.remoteAddress),
-      setupTokenRequired: setupRequired && !isLoopback(req.socket.remoteAddress),
+      localSetupAllowed,
+      setupTokenRequired: setupRequired && !localSetupAllowed,
     };
   }
 
