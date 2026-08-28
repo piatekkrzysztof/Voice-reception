@@ -186,6 +186,17 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   assert.match(assistant.model.messages[0].content, /\{\{"now" \| date:/);
   assert.match(assistant.model.messages[0].content, /Konsultacja \(30 min\)/);
   assert.match(assistant.model.messages[0].content, /dziewięć cyfr bez wymagania prefiksu \+48/);
+  assert.match(assistant.model.messages[0].content, /User's Keypad Entry/);
+  assert.deepEqual(assistant.transcriber, {
+    provider: 'openai',
+    model: 'gpt-4o-mini-transcribe',
+    language: 'pl',
+  });
+  assert.deepEqual(assistant.keypadInputPlan, {
+    enabled: true,
+    timeoutSeconds: 0,
+    delimiters: ['#'],
+  });
   assert.equal(assistant.server.credentialId, 'cred-123');
   const functionTools = assistant.model.tools.filter((tool) => tool.type === 'function');
   assert.equal(functionTools.length, 4);

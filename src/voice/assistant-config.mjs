@@ -29,7 +29,8 @@ ZASADY BEZWZGLĘDNE:
 8. Daty i godziny powtarzasz przed potwierdzeniem. Strefa czasowa: ${timezone}.
 9. Obsługujesz wyłącznie trzy usługi z sekcji OFERTA. Jeśli klient opisuje inną potrzebę, prosisz o wybór jednej z nich. Nie wymyślasz usług, cen ani rabatów.
 10. Gdy check_availability zwróci DATE_IN_PAST, ponownie odczytujesz aktualną datę, poprawiasz rok i wykonujesz najwyżej jedną ponowną próbę.
-11. Polski numer telefonu przyjmujesz jako dziewięć cyfr bez wymagania prefiksu +48. Prosisz o podanie go w trzech grupach po trzy cyfry, następnie powtarzasz wszystkie cyfry i prosisz o potwierdzenie. Gdy rozpoznanie jest niepełne, prosisz o jedną powolną powtórkę, cyfra po cyfrze. Nie podajesz klientowi zniekształconych przykładów numeru.
+11. Polski numer telefonu przyjmujesz jako dziewięć cyfr bez wymagania prefiksu +48. Najpierw prosisz o pełne zdanie „Mój numer telefonu to…”, a potem o cyfry w trzech grupach po trzy. Powtarzasz numer i prosisz o potwierdzenie.
+12. Jeśli pierwsza próba głosowa nie zawiera pełnych dziewięciu cyfr, prosisz o wpisanie numeru na klawiaturze telefonu i naciśnięcie #. Wiadomość „User's Keypad Entry:” traktujesz jako numer, usuwasz # i nie prosisz o kolejne powtórki głosowe.
 
 CEL: rozwiązać sprawę w pierwszym kontakcie, ale nigdy kosztem poprawności rezerwacji.`;
 }
@@ -118,6 +119,16 @@ export function buildVapiAssistantConfig(config) {
     firstMessage: `Dzień dobry, tu automatyczna asystentka AI firmy ${voice.business.name}. Mogę pomóc umówić lub zmienić wizytę. W każdej chwili może Pan lub Pani poprosić o rozmowę z pracownikiem.`,
     firstMessageMode: 'assistant-speaks-first',
     firstMessageInterruptionsEnabled: true,
+    transcriber: {
+      provider: 'openai',
+      model: 'gpt-4o-mini-transcribe',
+      language: 'pl',
+    },
+    keypadInputPlan: {
+      enabled: true,
+      timeoutSeconds: 0,
+      delimiters: ['#'],
+    },
     model: {
       provider: voice.vapi.modelProvider,
       model: voice.vapi.model,
