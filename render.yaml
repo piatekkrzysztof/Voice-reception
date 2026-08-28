@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: voice-reception
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/ready
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: 'production'
+      - key: HOST
+        value: '0.0.0.0'
+      - key: PILOT_MODE
+        value: 'false'
+      - key: ALLOW_LOCAL_PROVIDERS
+        value: 'true'
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL_MODE
+        value: 'verify-full'
+      - key: DATABASE_POOL_MAX
+        value: '3'
+      - key: VOICE_SETUP_TOKEN
+        generateValue: true
+      - key: VOICE_SLOT_SECRET
+        generateValue: true
+      - key: VOICE_WEBHOOK_SECRET
+        generateValue: true
+      - key: VOICE_PROVIDER
+        value: 'local'
+      - key: CALENDAR_PROVIDER
+        value: 'calcom'
+      - key: CALCOM_API_KEY
+        sync: false
+      - key: CALCOM_DEFAULT_ATTENDEE_EMAIL
+        sync: false
+      - key: CALCOM_EVENT_TYPE_KOLORYZACJA
+        sync: false
+      - key: CALCOM_EVENT_TYPE_STRZYZENIE
+        sync: false
+      - key: CALCOM_EVENT_TYPE_KONSULTACJA
+        sync: false
+      - key: CALCOM_RESERVE_SLOTS
+        value: 'true'
+      - key: DATA_RETENTION_ENABLED
+        value: 'true'

@@ -262,6 +262,11 @@ procedure — DNS, secrets, readiness, migrations, backup — is in
 `npm run calcom:check` validates the calendar configuration without creating a booking, and
 `npm run voice:sync` creates or updates the Vapi assistant.
 
+A zero-cost public demo can use a Free Render web service with a Free Neon PostgreSQL
+database. It does not require a domain and receives automatic HTTPS. The trade-off is a
+cold start after inactivity, so this option is for portfolio demonstrations and integration
+setup, not unattended production calls. See [`docs/RENDER_FREE.md`](docs/RENDER_FREE.md).
+
 ---
 
 ## Repository layout

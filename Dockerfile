@@ -20,6 +20,6 @@ COPY scripts ./scripts
 USER node
 EXPOSE 4173
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:4173/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD node -e "const port=process.env.PORT||4173;fetch('http://127.0.0.1:'+port+'/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["node", "server.mjs"]
