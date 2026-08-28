@@ -120,8 +120,8 @@ export function buildVapiAssistantConfig(config) {
     firstMessageMode: 'assistant-speaks-first',
     firstMessageInterruptionsEnabled: true,
     transcriber: {
-      provider: 'openai',
-      model: 'gpt-4o-mini-transcribe',
+      provider: 'deepgram',
+      model: 'nova-3',
       language: 'pl',
     },
     keypadInputPlan: {
