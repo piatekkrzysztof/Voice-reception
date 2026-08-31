@@ -189,6 +189,7 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   assert.match(assistant.model.messages[0].content, /User's Keypad Entry/);
   assert.deepEqual(assistant.transcriber, {
     provider: 'speechmatics',
+    model: 'default',
     language: 'pl',
     operatingPoint: 'enhanced',
     numeralStyle: 'written',

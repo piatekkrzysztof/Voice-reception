@@ -145,6 +145,7 @@ export function buildVapiAssistantConfig(config) {
     firstMessageInterruptionsEnabled: true,
     transcriber: {
       provider: 'speechmatics',
+      model: 'default',
       language: 'pl',
       operatingPoint: 'enhanced',
       numeralStyle: 'written',
