@@ -67,6 +67,31 @@ export function normalizePhoneNumber(value) {
   return null;
 }
 
+export function validatePhoneNumber(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const normalized = normalizePhoneNumber(raw);
+  if (!normalized) {
+    return {
+      valid: false,
+      digitCount: digits.length,
+      instruction: 'Poproś klienta tylko raz o ponowne podanie całego numeru cyfra po cyfrze.',
+    };
+  }
+  const nationalNumber =
+    normalized.startsWith('+48') && normalized.length === 12
+      ? normalized.slice(3)
+      : normalized.slice(1);
+  const groups = nationalNumber.match(/.{1,3}/g) || [nationalNumber];
+  return {
+    valid: true,
+    e164: normalized,
+    nationalNumber,
+    display: groups.join(' '),
+    digitCount: nationalNumber.length,
+  };
+}
+
 function toolArguments(toolCall) {
   const raw =
     toolCall.arguments ??
@@ -458,6 +483,7 @@ export async function createVoiceService({ config, state, databasePath, operatio
     const idempotencyKey = `vapi:${callId || 'unknown'}:${toolCall.id}`;
     if (name === 'check_availability') return availability(args);
     if (name === 'create_booking_hold') return createHold(args);
+    if (name === 'validate_phone_number') return validatePhoneNumber(args.phone);
     if (name === 'confirm_booking')
       return confirmBooking({
         holdId: args.holdId,

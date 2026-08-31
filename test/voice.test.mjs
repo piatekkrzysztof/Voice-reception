@@ -254,6 +254,32 @@ test('Vapi blokuje termin po naturalnym wyborze godziny bez kopiowania tokenu sl
   assert.equal(result.hold.status, 'active');
 });
 
+test('Vapi deterministycznie składa dziewięć cyfr mimo nieregularnych grup transkrypcji', async () => {
+  const webhook = await request('/api/webhooks/vapi', {
+    method: 'POST',
+    headers: { authorization: 'Bearer contract-test-webhook-secret' },
+    body: JSON.stringify({
+      message: {
+        type: 'tool-calls',
+        call: { id: 'vapi-phone-validation-call' },
+        toolCallList: [
+          {
+            id: 'tool-call-phone-validation',
+            name: 'validate_phone_number',
+            arguments: { phone: 'Mój numer telefonu to 723 20 769 6' },
+          },
+        ],
+      },
+    }),
+  });
+  assert.equal(webhook.response.status, 200);
+  const result = JSON.parse(webhook.body.results[0].result);
+  assert.equal(result.success, true);
+  assert.equal(result.valid, true);
+  assert.equal(result.e164, '+48723207696');
+  assert.equal(result.display, '723 207 696');
+});
+
 test('webhook Vapi wymaga sekretu i zapisuje wyłącznie raport końcowy', async () => {
   const unauthorized = await request('/api/webhooks/vapi', {
     method: 'POST',

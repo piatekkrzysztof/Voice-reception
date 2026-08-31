@@ -191,6 +191,10 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
     provider: 'deepgram',
     model: 'nova-3',
     language: 'pl',
+    numerals: true,
+  });
+  assert.deepEqual(assistant.backgroundSpeechDenoisingPlan, {
+    smartDenoisingPlan: { enabled: true },
   });
   assert.deepEqual(assistant.keypadInputPlan, {
     enabled: true,
@@ -199,7 +203,7 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   });
   assert.equal(assistant.server.credentialId, 'cred-123');
   const functionTools = assistant.model.tools.filter((tool) => tool.type === 'function');
-  assert.equal(functionTools.length, 4);
+  assert.equal(functionTools.length, 5);
   assert.ok(functionTools.every((tool) => tool.server.credentialId === 'cred-123'));
   assert.deepEqual(functionTools[0].function.parameters.properties.service.enum, [
     'Konsultacja',
@@ -209,6 +213,9 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   const holdTool = functionTools.find((tool) => tool.function.name === 'create_booking_hold');
   assert.deepEqual(holdTool.function.parameters.required, ['service', 'preferredDate', 'time']);
   assert.match(holdTool.function.parameters.properties.time.description, /piętnasta = 15:00/);
+  const phoneTool = functionTools.find((tool) => tool.function.name === 'validate_phone_number');
+  assert.deepEqual(phoneTool.function.parameters.required, ['phone']);
+  assert.match(assistant.model.messages[0].content, /Nigdy samodzielnie nie liczysz/);
   assert.match(
     functionTools.find((tool) => tool.function.name === 'confirm_booking').function.parameters
       .properties.phone.description,
