@@ -161,7 +161,12 @@ export async function createVoiceService({ config, state, databasePath, operatio
     return service;
   }
 
-  async function availability({ service: serviceValue, preferredDate, timeRange = 'any' }) {
+  async function availability({
+    service: serviceValue,
+    preferredDate,
+    timeRange = 'any',
+    exactTime = null,
+  }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredDate || ''))
       throw error('Data musi mieć format YYYY-MM-DD.', 'DATE_INVALID');
     if (preferredDate < dateInTimeZone(new Date(), voice.timezone))
@@ -185,6 +190,7 @@ export async function createVoiceService({ config, state, databasePath, operatio
         );
         return timeRange === 'morning' ? hour < 13 : timeRange === 'afternoon' ? hour >= 13 : true;
       })
+      .filter((slot) => !exactTime || timeLabel(slot.start, voice.timezone) === exactTime)
       .slice(0, 8)
       .map((slot) => ({
         id: signSlot(
@@ -223,8 +229,41 @@ export async function createVoiceService({ config, state, databasePath, operatio
     };
   }
 
-  async function createHold({ slotId }) {
-    const slot = verifySlot(slotId, voice.slotSecret);
+  function normalizeClockTime(value) {
+    const compact = String(value || '')
+      .trim()
+      .toLocaleLowerCase('pl-PL')
+      .replace(/^godzina\s+/, '')
+      .replace(/[.]$/, '')
+      .replace(',', ':')
+      .replace(/\s+/g, '');
+    const match = compact.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+    if (!match) return null;
+    const hour = Number(match[1]);
+    const minute = match[2] === undefined ? 0 : Number(match[2]);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || minute < 0 || minute > 59)
+      return null;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  async function createHold({ slotId, service: serviceValue, preferredDate, time }) {
+    let resolvedSlotId = slotId;
+    if (!resolvedSlotId) {
+      const normalizedTime = normalizeClockTime(time);
+      if (!normalizedTime)
+        throw error('Godzina musi mieć format HH:mm.', 'TIME_INVALID', 422);
+      const result = await availability({
+        service: serviceValue,
+        preferredDate,
+        timeRange: 'any',
+        exactTime: normalizedTime,
+      });
+      const selectedSlot = result.slots.find((candidate) => candidate.time === normalizedTime);
+      if (!selectedSlot)
+        throw error('Wybrany termin nie jest już dostępny.', 'SLOT_UNAVAILABLE', 409);
+      resolvedSlotId = selectedSlot.id;
+    }
+    const slot = verifySlot(resolvedSlotId, voice.slotSecret);
     if (slot.tenantId !== tenantId)
       throw error('Termin należy do innej organizacji.', 'TENANT_MISMATCH', 403);
     const service = await serviceBy(slot.serviceId);

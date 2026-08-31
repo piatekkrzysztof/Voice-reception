@@ -31,6 +31,9 @@ ZASADY BEZWZGLĘDNE:
 10. Gdy check_availability zwróci DATE_IN_PAST, ponownie odczytujesz aktualną datę, poprawiasz rok i wykonujesz najwyżej jedną ponowną próbę.
 11. Polski numer telefonu przyjmujesz jako dziewięć cyfr bez wymagania prefiksu +48. Najpierw prosisz o pełne zdanie „Mój numer telefonu to…”, a potem o cyfry w trzech grupach po trzy. Powtarzasz numer i prosisz o potwierdzenie.
 12. Jeśli pierwsza próba głosowa nie zawiera pełnych dziewięciu cyfr, prosisz o wpisanie numeru na klawiaturze telefonu i naciśnięcie #. Wiadomość „User's Keypad Entry:” traktujesz jako numer, usuwasz # i nie prosisz o kolejne powtórki głosowe.
+13. Rozumiesz naturalne polskie określenia godzin. „Piętnasta” oznacza 15:00, „wpół do drugiej” w kontekście popołudnia oznacza 13:30, „kwadrans po trzeciej” oznacza 15:15, a „za kwadrans czwarta” oznacza 15:45. Nigdy nie wymagaj od klienta formy liczebnika „piętnaście”, gdy naturalnie mówi „piętnasta”.
+14. Do create_booking_hold przekazujesz usługę, datę YYYY-MM-DD oraz znormalizowaną godzinę HH:mm. Nie przekazujesz surowego tekstu klienta ani technicznego identyfikatora slotu.
+15. Godziny wypowiadasz naturalnie po polsku: 13:00 jako „trzynasta”, 13:30 jako „trzynasta trzydzieści” albo „wpół do drugiej”. Nie czytasz dwukropka, zer ani cyfr jako osobnych elementów.
 
 CEL: rozwiązać sprawę w pierwszym kontakcie, ale nigdy kosztem poprawności rezerwacji.`;
 }
@@ -66,14 +69,21 @@ export function buildVapiAssistantConfig(config) {
     ),
     functionTool(
       'create_booking_hold',
-      'Blokuje wybrany termin na pięć minut. Użyj po wyborze klienta.',
+      'Blokuje wybrany termin na pięć minut. Przekaż usługę, datę i godzinę wybraną przez klienta.',
       {
-        slotId: {
+        service: {
           type: 'string',
-          description: 'Podpisany identyfikator zwrócony przez check_availability',
+          enum: BOOKABLE_SERVICES,
+          description: 'Usługa wybrana wcześniej przez klienta',
+        },
+        preferredDate: { type: 'string', description: 'Data wizyty w formacie YYYY-MM-DD' },
+        time: {
+          type: 'string',
+          description:
+            'Godzina w formacie HH:mm po interpretacji naturalnej polskiej wypowiedzi, np. piętnasta = 15:00, wpół do drugiej po południu = 13:30',
         },
       },
-      ['slotId'],
+      ['service', 'preferredDate', 'time'],
       webhookUrl,
       credentialId,
     ),

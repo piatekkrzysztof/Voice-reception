@@ -206,6 +206,9 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
     'Strzyżenie',
     'Koloryzacja',
   ]);
+  const holdTool = functionTools.find((tool) => tool.function.name === 'create_booking_hold');
+  assert.deepEqual(holdTool.function.parameters.required, ['service', 'preferredDate', 'time']);
+  assert.match(holdTool.function.parameters.properties.time.description, /piętnasta = 15:00/);
   assert.match(
     functionTools.find((tool) => tool.function.name === 'confirm_booking').function.parameters
       .properties.phone.description,

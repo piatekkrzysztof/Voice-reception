@@ -225,6 +225,35 @@ test('Vapi Tool Gateway zwraca wymagany kontrakt result', async () => {
   assert.ok(result.slots.length > 0);
 });
 
+test('Vapi blokuje termin po naturalnym wyborze godziny bez kopiowania tokenu slotu', async () => {
+  const webhook = await request('/api/webhooks/vapi', {
+    method: 'POST',
+    headers: { authorization: 'Bearer contract-test-webhook-secret' },
+    body: JSON.stringify({
+      message: {
+        type: 'tool-calls',
+        call: { id: 'vapi-natural-time-call' },
+        toolCallList: [
+          {
+            id: 'tool-call-natural-hold',
+            name: 'create_booking_hold',
+            arguments: {
+              service: 'Konsultacja',
+              preferredDate: '2030-01-04',
+              time: '15.',
+            },
+          },
+        ],
+      },
+    }),
+  });
+  assert.equal(webhook.response.status, 200);
+  const result = JSON.parse(webhook.body.results[0].result);
+  assert.equal(result.success, true);
+  assert.equal(result.slot.time, '15:00');
+  assert.equal(result.hold.status, 'active');
+});
+
 test('webhook Vapi wymaga sekretu i zapisuje wyłącznie raport końcowy', async () => {
   const unauthorized = await request('/api/webhooks/vapi', {
     method: 'POST',
