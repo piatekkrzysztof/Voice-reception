@@ -188,10 +188,11 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   assert.match(assistant.model.messages[0].content, /dziewięć cyfr bez wymagania prefiksu \+48/);
   assert.match(assistant.model.messages[0].content, /User's Keypad Entry/);
   assert.deepEqual(assistant.transcriber, {
-    provider: 'deepgram',
-    model: 'nova-3',
+    provider: 'speechmatics',
     language: 'pl',
-    numerals: true,
+    operatingPoint: 'enhanced',
+    numeralStyle: 'written',
+    region: 'eu',
   });
   assert.deepEqual(assistant.backgroundSpeechDenoisingPlan, {
     smartDenoisingPlan: { enabled: true },

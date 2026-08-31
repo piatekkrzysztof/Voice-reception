@@ -144,10 +144,11 @@ export function buildVapiAssistantConfig(config) {
     firstMessageMode: 'assistant-speaks-first',
     firstMessageInterruptionsEnabled: true,
     transcriber: {
-      provider: 'deepgram',
-      model: 'nova-3',
+      provider: 'speechmatics',
       language: 'pl',
-      numerals: true,
+      operatingPoint: 'enhanced',
+      numeralStyle: 'written',
+      region: 'eu',
     },
     backgroundSpeechDenoisingPlan: { smartDenoisingPlan: { enabled: true } },
     keypadInputPlan: {
