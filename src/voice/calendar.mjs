@@ -92,7 +92,7 @@ function createCalComCalendar(config) {
 
   async function request(
     path,
-    { method = 'GET', version = '2026-02-25', body, authenticated = true } = {},
+    { method = 'GET', version = '2026-02-25', body, authenticated = true, envelope = false } = {},
   ) {
     if (!cal.apiKey && authenticated)
       throw voiceError('Brak CALCOM_API_KEY.', 'CALCOM_NOT_CONFIGURED', 503);
@@ -119,7 +119,17 @@ function createCalComCalendar(config) {
         cause,
       );
     }
-    const payload = await response.json().catch(() => ({}));
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw voiceError(
+        'Nie można odczytać odpowiedzi Cal.com.',
+        'CALCOM_RESPONSE_INVALID',
+        502,
+        cause,
+      );
+    }
     if (!response.ok || payload.status === 'error') {
       const code =
         response.status === 409
@@ -145,7 +155,7 @@ function createCalComCalendar(config) {
       if (Number.isFinite(retryAfter)) failure.retryAfter = retryAfter;
       throw failure;
     }
-    return payload.data ?? payload;
+    return envelope ? payload : (payload.data ?? payload);
   }
 
   return {
@@ -220,7 +230,64 @@ function createCalComCalendar(config) {
           metadata: { source: 'voice-reception', holdId: hold.id },
         },
       });
-      return { uid: data.uid, start: data.start, end: data.end, raw: data };
+      if (!data.uid)
+        throw voiceError(
+          'Cal.com nie zwrócił identyfikatora rezerwacji.',
+          'CALCOM_RESPONSE_INVALID',
+        );
+      return { uid: data.uid, start: data.start, end: data.end, status: data.status, raw: data };
+    },
+    async findBooking({ hold, service }) {
+      const matches = [];
+      if (hold.providerBookingUid) {
+        matches.push(await request(`/v2/bookings/${encodeURIComponent(hold.providerBookingUid)}`));
+      } else {
+        let cursor = null;
+        for (let page = 0; page < 10; page += 1) {
+          const params = new URLSearchParams({
+            eventTypeId: String(service.externalEventTypeId),
+            afterStart: new Date(new Date(hold.startAt).getTime() - 1_000).toISOString(),
+            beforeEnd: new Date(new Date(hold.endAt).getTime() + 1_000).toISOString(),
+            limit: '100',
+          });
+          if (cursor) params.set('cursor', cursor);
+          const payload = await request(`/v2/bookings?${params}`, {
+            version: '2026-05-01',
+            envelope: true,
+          });
+          if (!Array.isArray(payload.data) || typeof payload.pagination?.hasMore !== 'boolean')
+            throw voiceError('Nieprawidłowa lista rezerwacji Cal.com.', 'CALCOM_RESPONSE_INVALID');
+          matches.push(...payload.data.filter((item) => item.metadata?.holdId === hold.id));
+          if (!payload.pagination?.hasMore) break;
+          const next = payload.pagination.nextCursor;
+          if (!next || next === cursor || page === 9)
+            throw voiceError(
+              'Nie można zakończyć kontroli rezerwacji.',
+              'CALCOM_RECONCILIATION_INCOMPLETE',
+            );
+          cursor = next;
+        }
+      }
+      if (matches.length > 1)
+        throw voiceError(
+          'Wiele rezerwacji odpowiada jednej operacji.',
+          'CALCOM_RECONCILIATION_CONFLICT',
+        );
+      const match = matches[0];
+      if (!match) return null;
+      if (
+        !match.uid ||
+        match.metadata?.source !== 'voice-reception' ||
+        match.metadata?.holdId !== hold.id ||
+        Number(match.eventTypeId) !== service.externalEventTypeId ||
+        new Date(match.start).getTime() !== new Date(hold.startAt).getTime() ||
+        new Date(match.end).getTime() !== new Date(hold.endAt).getTime()
+      )
+        throw voiceError(
+          'Dane rezerwacji wymagają sprawdzenia przez właściciela.',
+          'CALCOM_RECONCILIATION_CONFLICT',
+        );
+      return { uid: match.uid, status: match.status };
     },
     async cancel(providerUid, reason = 'Odwołano przez recepcję AI') {
       if (!providerUid) return { cancelled: true };

@@ -37,8 +37,8 @@ test(
         expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
       };
       const attempts = await Promise.allSettled([
-        database.createHold(holdInput),
-        database.createHold(holdInput),
+        database.createHold({ ...holdInput, serviceId: 'svc-haircut' }),
+        database.createHold({ ...holdInput, serviceId: 'svc-coloring' }),
       ]);
       assert.equal(attempts.filter((result) => result.status === 'fulfilled').length, 1);
       assert.equal(attempts.filter((result) => result.status === 'rejected').length, 1);
@@ -60,6 +60,43 @@ test(
       });
       assert.equal(booking.status, 'confirmed');
       assert.equal((await database.findBookingByIdempotency(idempotencyKey)).id, booking.id);
+      assert.equal((await database.findBooking({ holdId: hold.id }, tenantId)).id, booking.id);
+      assert.equal(await database.findBooking({ holdId: hold.id }, 'other-tenant'), null);
+      const recoveryHold = await database.createHold({
+        ...holdInput,
+        startAt: '2035-01-10T15:00:00.000Z',
+        endAt: '2035-01-10T16:00:00.000Z',
+      });
+      const confirmation = {
+        customerName: 'Recovery',
+        phone: '+48600100200',
+        idempotencyKey: `recover:${tenantId}`,
+      };
+      await database.claimHold(recoveryHold.id, tenantId, confirmation);
+      await database.pool.query('UPDATE voice_holds SET expires_at = $1 WHERE id = $2', [
+        '2000-01-01',
+        recoveryHold.id,
+      ]);
+      assert.equal((await database.getHold(recoveryHold.id, tenantId)).status, 'confirming');
+      assert.equal((await database.pendingConfirmations(tenantId)).length, 1);
+      assert.equal(
+        await database.slotIsFree({
+          ...holdInput,
+          serviceId: 'svc-coloring',
+          startAt: recoveryHold.startAt,
+          endAt: recoveryHold.endAt,
+        }),
+        false,
+      );
+      await database.saveProviderBooking(recoveryHold.id, 'recovered-uid', tenantId);
+      const recovered = await database.getHold(recoveryHold.id, tenantId);
+      assert.equal(recovered.providerBookingUid, 'recovered-uid');
+      await database.confirmHold({
+        hold: recovered,
+        ...confirmation,
+        providerUid: recovered.providerBookingUid,
+      });
+      assert.equal((await database.pendingConfirmations(tenantId)).length, 0);
       assert.equal(await database.health(), true);
 
       await database.upsertCall({
@@ -88,7 +125,7 @@ test(
       assert.equal(retainedBooking.customer, '[usunięto po retencji]');
       assert.equal(retainedBooking.phone, '');
       assert.ok(retention.deletedEvents >= 1);
-      assert.equal(Number((await database.stats(tenantId)).bookings), 1);
+      assert.equal(Number((await database.stats(tenantId)).bookings), 2);
 
       const otherTenantId = `contract-${crypto.randomBytes(5).toString('hex')}`;
       const otherTenantDatabase = await createPostgresDatabase({

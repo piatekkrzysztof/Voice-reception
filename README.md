@@ -73,7 +73,7 @@ flowchart TB
 
     subgraph app["Voice Reception (Node.js)"]
         webhook["webhook<br/>shared-secret auth"]
-        gateway["Tool Gateway<br/>check_availability<br/>create_booking_hold<br/>confirm_booking<br/>cancel_booking"]
+        gateway["Tool Gateway<br/>check_availability<br/>create_booking_hold<br/>confirm_booking<br/>validate_phone_number"]
         service["service.mjs<br/>booking rules"]
         console["operations console<br/>HttpOnly session"]
         webhook --> gateway --> service
@@ -112,7 +112,10 @@ almost none.
 calls when the line stutters or the caller says "yes" twice. Confirmation is therefore
 idempotent: the same hold confirmed twice yields one booking, not two. Slots are signed so
 the agent cannot invent a time that was never offered, and holds expire so an abandoned
-call does not block the calendar forever.
+call does not block the calendar forever. Once a confirmation may have reached Cal.com,
+its durable journal keeps the slot blocked until the outcome is reconciled. The shared
+resource is one operator across all three services. Voice cancellation is disabled;
+the authenticated owner console retains cancellation. See [pilot hardening](docs/PILOT_HARDENING.md).
 
 **The race is tested against a real PostgreSQL, not a mock.** The test that matters most —
 two callers going for the same slot — runs against an actual database with actual

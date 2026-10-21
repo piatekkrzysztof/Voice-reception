@@ -94,7 +94,7 @@ npm run voice:sync
 
 Przy pierwszym uruchomieniu skrypt wypisze `VAPI_ASSISTANT_ID`. Wpisz go do `.env`, uruchom synchronizację ponownie i przypisz asystenta do numeru telefonu w Vapi.
 
-Konfiguracja asystenta zawiera cztery narzędzia bookingowe, wyłączone nagrywanie, analizę strukturalną, komunikat o AI i opcjonalny transfer do człowieka.
+Konfiguracja asystenta zawiera trzy narzędzia rezerwacji i walidację telefonu, wyłączone nagrywanie, analizę strukturalną, komunikat o AI i opcjonalny transfer do człowieka. Anulowanie jest dostępne tylko w zalogowanym panelu właściciela. [Zabezpieczenia i odzyskiwanie](PILOT_HARDENING.md).
 
 ## 5. Bramka operacyjna
 
@@ -128,7 +128,7 @@ Pilot można uznać za technicznie podłączony dopiero, gdy przejdą wszystkie 
 - powtórzone wywołanie nie tworzy duplikatu,
 - dwóch rozmówców nie może zarezerwować jednego terminu,
 - agent nie potwierdza wizyty przy błędzie lub timeoutcie kalendarza,
-- anulowanie usuwa aktywną rezerwację,
+- anulowanie w zalogowanym panelu usuwa aktywną rezerwację, a anulowanie głosowe jest kierowane do obsługi,
 - prośba o człowieka uruchamia transfer,
 - raport końca rozmowy pokazuje właściwy wynik bez audio i pełnej transkrypcji,
 - polskie nazwiska, numery telefonu, cisza i przerwanie wypowiedzi są obsługiwane akceptowalnie.

@@ -127,7 +127,13 @@ export function verifyVapiWebhook(headers, webhookSecret) {
   );
 }
 
-export async function createVoiceService({ config, state, databasePath, operations }) {
+export async function createVoiceService({
+  config,
+  state,
+  databasePath,
+  operations,
+  calendar: suppliedCalendar,
+}) {
   const voice = config.voice;
   const tenantId = voice.business.tenantId;
   const db = await createVoiceDatabase({
@@ -137,7 +143,8 @@ export async function createVoiceService({ config, state, databasePath, operatio
     seedCalls: state.calls || [],
   });
   await db.configureEventTypes(voice.calcom.eventTypes, tenantId);
-  const calendar = createCalendar(voice);
+  const calendar = suppliedCalendar || createCalendar(voice);
+  const confirming = new Set();
   const retention = config.operations.retention;
 
   function dateBefore(days) {
@@ -266,8 +273,7 @@ export async function createVoiceService({ config, state, databasePath, operatio
     if (!match) return null;
     const hour = Number(match[1]);
     const minute = match[2] === undefined ? 0 : Number(match[2]);
-    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || minute < 0 || minute > 59)
-      return null;
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   }
 
@@ -275,8 +281,7 @@ export async function createVoiceService({ config, state, databasePath, operatio
     let resolvedSlotId = slotId;
     if (!resolvedSlotId) {
       const normalizedTime = normalizeClockTime(time);
-      if (!normalizedTime)
-        throw error('Godzina musi mieć format HH:mm.', 'TIME_INVALID', 422);
+      if (!normalizedTime) throw error('Godzina musi mieć format HH:mm.', 'TIME_INVALID', 422);
       const result = await availability({
         service: serviceValue,
         preferredDate,
@@ -342,22 +347,44 @@ export async function createVoiceService({ config, state, databasePath, operatio
   async function confirmBooking({ holdId, customerName, phone, email, idempotencyKey }) {
     if (!idempotencyKey) throw error('Brak Idempotency-Key.', 'IDEMPOTENCY_REQUIRED');
     const existing = await db.findBookingByIdempotency(idempotencyKey);
-    if (existing) return { confirmed: true, booking: existing, idempotentReplay: true };
+    if (existing && existing.tenantId === tenantId)
+      return { confirmed: true, booking: existing, idempotentReplay: true };
+    if (existing) throw error('Klucz operacji jest już używany.', 'IDEMPOTENCY_CONFLICT', 409);
+    const byHold = await db.findBooking({ holdId }, tenantId);
+    if (byHold) return { confirmed: true, booking: byHold, idempotentReplay: true };
+    const current = await db.getHold(holdId, tenantId);
+    if (current?.status === 'confirming')
+      throw error(
+        'Wynik poprzedniej operacji jest sprawdzany. Nie twórz kolejnej rezerwacji; poproś o kontakt z obsługą.',
+        'BOOKING_PENDING',
+        409,
+      );
     if (!customerName?.trim()) throw error('Imię klienta jest wymagane.', 'CUSTOMER_NAME_REQUIRED');
     const normalizedPhone = normalizePhoneNumber(phone);
-    if (!normalizedPhone)
-      throw error('Numer telefonu ma nieprawidłowy format.', 'PHONE_INVALID');
-    const hold = await db.claimHold(holdId, tenantId);
-    const service = await serviceBy(hold.serviceId);
+    if (!normalizedPhone) throw error('Numer telefonu ma nieprawidłowy format.', 'PHONE_INVALID');
+    const confirmation = {
+      customerName: customerName.trim(),
+      phone: normalizedPhone,
+      email,
+      idempotencyKey,
+    };
+    const hold = await db.claimHold(holdId, tenantId, confirmation);
+    confirming.add(hold.id);
+    let submitted = false;
     let providerBooking = null;
     try {
+      const service = await serviceBy(hold.serviceId);
       if (hold.providerReservationUid)
         await calendar.releaseReservation(hold.providerReservationUid);
+      submitted = true;
       providerBooking = await calendar.book({
         hold,
         service,
         customer: { name: customerName.trim(), phone: normalizedPhone, email },
       });
+      await db.saveProviderBooking(hold.id, providerBooking.uid, tenantId);
+      if (providerBooking.status && providerBooking.status !== 'accepted')
+        throw error('Rezerwacja oczekuje na sprawdzenie w kalendarzu.', 'BOOKING_PENDING', 409);
       const booking = await db.confirmHold({
         hold,
         customerName: customerName.trim(),
@@ -366,28 +393,49 @@ export async function createVoiceService({ config, state, databasePath, operatio
         providerUid: providerBooking.uid,
         idempotencyKey,
       });
-      await db.recordEvent({
-        tenantId,
-        type: 'booking.confirmed',
-        detail: {
-          bookingId: booking.id,
-          providerUid: booking.providerUid,
-          service: service.name,
-          startAt: booking.startAt,
-        },
-      });
+      await Promise.resolve()
+        .then(() =>
+          db.recordEvent({
+            tenantId,
+            type: 'booking.confirmed',
+            detail: {
+              bookingId: booking.id,
+              providerUid: booking.providerUid,
+              service: service.name,
+              startAt: booking.startAt,
+            },
+          }),
+        )
+        .catch(() =>
+          operations?.notify({
+            severity: 'error',
+            code: 'BOOKING_AUDIT_FAILED',
+            component: 'booking',
+          }),
+        );
       return { confirmed: true, booking };
     } catch (caught) {
-      await db.releaseClaim(hold.id);
-      if (providerBooking?.uid)
-        await calendar
-          .cancel(providerBooking.uid, 'Kompensacja po błędzie lokalnej transakcji')
-          .catch(() => {});
-      await db.recordEvent({
-        tenantId,
-        type: 'booking.failed',
-        detail: { holdId, code: caught.code || 'UNKNOWN' },
-      });
+      // Once POST may have reached the provider, never retry or release the slot blindly.
+      const definiteRejection = [
+        'CALENDAR_CONFLICT',
+        'CALCOM_ERROR',
+        'CALCOM_RATE_LIMITED',
+        'ATTENDEE_EMAIL_REQUIRED',
+      ].includes(caught.code);
+      if (!submitted || (!providerBooking && definiteRejection)) {
+        await db.releaseClaim(hold.id);
+      } else {
+        operations?.notify({ severity: 'critical', code: 'BOOKING_PENDING', component: 'booking' });
+      }
+      await Promise.resolve()
+        .then(() =>
+          db.recordEvent({
+            tenantId,
+            type: 'booking.failed',
+            detail: { holdId, code: caught.code || 'UNKNOWN' },
+          }),
+        )
+        .catch(() => {});
       if ((caught.status || 500) >= 500)
         operations?.notify({
           severity: 'critical',
@@ -395,13 +443,71 @@ export async function createVoiceService({ config, state, databasePath, operatio
           component: 'booking',
         });
       throw caught;
+    } finally {
+      confirming.delete(hold.id);
     }
   }
 
+  let recoveryWork;
+  async function reconcileBookings() {
+    if (recoveryWork) return recoveryWork;
+    recoveryWork = (async () => {
+      const summary = { recovered: 0, pending: 0, released: 0 };
+      for (const hold of await db.pendingConfirmations(tenantId)) {
+        if (confirming.has(hold.id)) {
+          summary.pending += 1;
+          continue;
+        }
+        try {
+          const service = await serviceBy(hold.serviceId);
+          const match = calendar.findBooking ? await calendar.findBooking({ hold, service }) : null;
+          if (match?.status === 'accepted') {
+            await db.confirmHold({
+              hold,
+              ...JSON.parse(hold.confirmationJson),
+              providerUid: match.uid,
+            });
+            summary.recovered += 1;
+          } else if (match && ['cancelled', 'rejected'].includes(match.status)) {
+            await db.releaseClaim(hold.id);
+            summary.released += 1;
+          } else {
+            summary.pending += 1;
+          }
+        } catch {
+          summary.pending += 1;
+        }
+      }
+      if (summary.pending)
+        operations?.notify({
+          severity: 'critical',
+          code: 'BOOKING_PENDING',
+          component: 'reconciliation',
+        });
+      return summary;
+    })();
+    try {
+      return await recoveryWork;
+    } finally {
+      recoveryWork = null;
+    }
+  }
+
+  const recoveryTimer = calendar.live
+    ? setInterval(() => {
+        reconcileBookings().catch(() =>
+          operations?.notify({
+            severity: 'critical',
+            code: 'RECONCILIATION_FAILED',
+            component: 'booking',
+          }),
+        );
+      }, 60_000)
+    : null;
+  recoveryTimer?.unref();
+
   async function cancelBooking({ bookingId, reason }) {
-    const booking = (await db.listBookings(tenantId, 200)).find(
-      (item) => item.id === bookingId || item.providerUid === bookingId,
-    );
+    const booking = await db.findBooking({ bookingId }, tenantId);
     if (!booking) throw error('Nie znaleziono rezerwacji.', 'BOOKING_NOT_FOUND', 404);
     if (booking.status !== 'confirmed')
       throw error('Rezerwacja nie jest aktywna.', 'BOOKING_NOT_ACTIVE', 409);
@@ -447,17 +553,23 @@ export async function createVoiceService({ config, state, databasePath, operatio
   }
 
   async function dashboard() {
-    const [calls, bookings, totals, services, operational] = await Promise.all([
+    const [calls, bookings, totals, services, operational, pending] = await Promise.all([
       db.listCalls(tenantId),
       db.listBookings(tenantId),
       db.stats(tenantId),
       db.listServices(tenantId),
       operationalMetrics(),
+      db.pendingConfirmations(tenantId),
     ]);
     const integration = publicVoiceConfig(config);
     return {
       calls,
       bookings,
+      pendingConfirmations: pending.map((hold) => ({
+        id: hold.id,
+        startAt: hold.startAt,
+        createdAt: hold.createdAt,
+      })),
       services,
       integration,
       metrics: {
@@ -492,7 +604,12 @@ export async function createVoiceService({ config, state, databasePath, operatio
         email: args.email,
         idempotencyKey,
       });
-    if (name === 'cancel_booking') return cancelBooking(args);
+    if (name === 'cancel_booking')
+      throw error(
+        'Anulowanie wymaga obsługi w zalogowanym panelu właściciela. Poproś klienta o kontakt z obsługą.',
+        'CANCELLATION_REQUIRES_OWNER',
+        403,
+      );
     throw error(`Nieobsługiwane narzędzie: ${name}`, 'TOOL_NOT_SUPPORTED', 400);
   }
 
@@ -626,9 +743,12 @@ export async function createVoiceService({ config, state, databasePath, operatio
     handleVapiMessage,
     operationalMetrics,
     runRetention,
+    reconcileBookings,
     config: () => publicVoiceConfig(config),
     close: async () => {
       if (retentionTimer) clearInterval(retentionTimer);
+      if (recoveryTimer) clearInterval(recoveryTimer);
+      if (recoveryWork) await recoveryWork.catch(() => {});
       await db.close();
     },
     ready: () => db.health(),

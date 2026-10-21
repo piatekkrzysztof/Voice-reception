@@ -284,6 +284,9 @@ async function loadDashboard({ quiet = false, force = false } = {}) {
     renderReadiness(data);
     renderServices(data.services);
     renderBookings(data.bookings);
+    const pending = data.pendingConfirmations || [];
+    $('#recovery').hidden = pending.length === 0;
+    $('#pending-list').innerHTML = pending.map((hold) => `<p>${escapeHtml(hold.id)} · ${escapeHtml(formatDate(hold.startAt))}</p>`).join('');
     renderCalls(data.calls, data.metrics);
     if (!quiet) showToast('Dane operacyjne zostały odświeżone.');
   } catch (error) {
@@ -406,6 +409,17 @@ document.addEventListener('click', (event) => {
 
 $('#availability-form').addEventListener('submit', checkAvailability);
 $('#refresh-button').addEventListener('click', () => loadDashboard());
+$('#reconcile-button').addEventListener('click', async () => {
+  const button = $('#reconcile-button');
+  button.disabled = true;
+  try {
+    const result = await api('/api/voice/reconcile', { method: 'POST' });
+    showToast(`Odzyskano: ${result.recovered}. Do sprawdzenia: ${result.pending}.`);
+    await loadDashboard({ quiet: true, force: true });
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally { button.disabled = false; }
+});
 $('#setup-form').addEventListener('submit', handleSetup);
 $('#login-form').addEventListener('submit', handleLogin);
 $('#logout-button').addEventListener('click', logout);

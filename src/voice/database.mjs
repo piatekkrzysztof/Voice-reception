@@ -110,6 +110,17 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       ON voice_sessions(expires_at);
   `);
 
+  const holdColumns = new Set(
+    db
+      .prepare('PRAGMA table_info(voice_holds)')
+      .all()
+      .map((c) => c.name),
+  );
+  if (!holdColumns.has('confirmation_json'))
+    db.exec('ALTER TABLE voice_holds ADD COLUMN confirmation_json TEXT');
+  if (!holdColumns.has('provider_booking_uid'))
+    db.exec('ALTER TABLE voice_holds ADD COLUMN provider_booking_uid TEXT');
+
   const serviceRows = [
     ['svc-coloring', 'coloring', 'Koloryzacja', 120],
     ['svc-haircut', 'haircut', 'Strzyżenie', 60],
@@ -169,7 +180,7 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     return db
       .prepare(
         `UPDATE voice_holds SET status = 'expired'
-      WHERE status IN ('active','confirming') AND expires_at <= ?`,
+      WHERE (status = 'active' OR (status = 'confirming' AND confirmation_json IS NULL)) AND expires_at <= ?`,
       )
       .run(now).changes;
   }
@@ -194,23 +205,23 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     }
   }
 
-  function slotIsFree({ tenantId: currentTenant = tenantId, serviceId, startAt, endAt }) {
+  function slotIsFree({ tenantId: currentTenant = tenantId, startAt, endAt }) {
     expireHolds();
     const booking = db
       .prepare(
         `SELECT id FROM voice_bookings
-      WHERE tenant_id = ? AND service_id = ? AND status = 'confirmed'
+      WHERE tenant_id = ? AND status = 'confirmed'
       AND start_at < ? AND end_at > ? LIMIT 1`,
       )
-      .get(currentTenant, serviceId, endAt, startAt);
+      .get(currentTenant, endAt, startAt);
     if (booking) return false;
     const hold = db
       .prepare(
         `SELECT id FROM voice_holds
-      WHERE tenant_id = ? AND service_id = ? AND status IN ('active','confirming') AND expires_at > ?
+      WHERE tenant_id = ? AND (status = 'confirming' OR (status = 'active' AND expires_at > ?))
       AND start_at < ? AND end_at > ? LIMIT 1`,
       )
-      .get(currentTenant, serviceId, new Date().toISOString(), endAt, startAt);
+      .get(currentTenant, new Date().toISOString(), endAt, startAt);
     return !hold;
   }
 
@@ -266,13 +277,14 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
       .prepare(
         `SELECT id, tenant_id AS tenantId, service_id AS serviceId, start_at AS startAt,
       end_at AS endAt, status, provider_reservation_uid AS providerReservationUid,
-      expires_at AS expiresAt, created_at AS createdAt FROM voice_holds WHERE id = ? AND tenant_id = ?`,
+      expires_at AS expiresAt, created_at AS createdAt, confirmation_json AS confirmationJson,
+      provider_booking_uid AS providerBookingUid FROM voice_holds WHERE id = ? AND tenant_id = ?`,
       )
       .get(holdId, currentTenant);
     return row || null;
   }
 
-  function claimHold(holdId, currentTenant = tenantId) {
+  function claimHold(holdId, currentTenant = tenantId, confirmation = null) {
     return transaction(() => {
       expireHolds();
       const hold = getHold(holdId, currentTenant);
@@ -283,15 +295,16 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
         throw error;
       }
       db.prepare(
-        `UPDATE voice_holds SET status = 'confirming' WHERE id = ? AND status = 'active'`,
-      ).run(holdId);
+        `UPDATE voice_holds SET status = 'confirming', confirmation_json = ? WHERE id = ? AND status = 'active'`,
+      ).run(confirmation ? JSON.stringify(confirmation) : null, holdId);
       return { ...hold, status: 'confirming' };
     });
   }
 
   function releaseClaim(holdId) {
     db.prepare(
-      `UPDATE voice_holds SET status = CASE WHEN expires_at > ? THEN 'active' ELSE 'expired' END
+      `UPDATE voice_holds SET status = CASE WHEN expires_at > ? THEN 'active' ELSE 'expired' END,
+          confirmation_json = NULL, provider_booking_uid = NULL
       WHERE id = ? AND status = 'confirming'`,
     ).run(new Date().toISOString(), holdId);
   }
@@ -338,6 +351,35 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     };
   }
 
+  function findBooking({ bookingId = '', holdId = '' }, currentTenant = tenantId) {
+    const row = db
+      .prepare(
+        `SELECT b.*, s.name AS service_name, s.duration_minutes
+      FROM voice_bookings b JOIN voice_services s ON s.id = b.service_id
+      WHERE b.tenant_id = ? AND (b.id = ? OR b.provider_uid = ? OR b.hold_id = ?)`,
+      )
+      .get(currentTenant, bookingId, bookingId, holdId);
+    return row ? mapBooking(row) : null;
+  }
+
+  function pendingConfirmations(currentTenant = tenantId) {
+    return db
+      .prepare(
+        `SELECT id FROM voice_holds
+      WHERE tenant_id = ? AND status = 'confirming' AND confirmation_json IS NOT NULL
+      ORDER BY created_at LIMIT 100`,
+      )
+      .all(currentTenant)
+      .map((row) => getHold(row.id, currentTenant));
+  }
+
+  function saveProviderBooking(holdId, uid, currentTenant = tenantId) {
+    db.prepare(
+      `UPDATE voice_holds SET provider_booking_uid = ?
+      WHERE id = ? AND tenant_id = ? AND status = 'confirming'`,
+    ).run(uid, holdId, currentTenant);
+  }
+
   function confirmHold({ hold, customerName, phone, email, providerUid, idempotencyKey }) {
     return transaction(() => {
       const existing = findBookingByIdempotency(idempotencyKey);
@@ -378,7 +420,10 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
         error.cause = cause;
         throw error;
       }
-      db.prepare(`UPDATE voice_holds SET status = 'confirmed' WHERE id = ?`).run(hold.id);
+      db.prepare(
+        `UPDATE voice_holds SET status = 'confirmed', confirmation_json = NULL,
+        provider_booking_uid = NULL WHERE id = ?`,
+      ).run(hold.id);
       return findBookingByIdempotency(idempotencyKey);
     });
   }
@@ -643,6 +688,9 @@ export function createVoiceDatabase({ path, tenantId, seedCalls = [] }) {
     claimHold,
     releaseClaim,
     findBookingByIdempotency,
+    findBooking,
+    pendingConfirmations,
+    saveProviderBooking,
     confirmHold,
     listBookings,
     cancelBooking,

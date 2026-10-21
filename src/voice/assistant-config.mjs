@@ -24,7 +24,7 @@ ZASADY BEZWZGLĘDNE:
 3. Po wyborze godziny tworzysz blokadę create_booking_hold. Rezerwację potwierdzasz dopiero po zebraniu imienia, telefonu i wyraźnym potwierdzeniu klienta.
 4. confirm_booking wywołujesz dokładnie raz. Jeśli narzędzie zwróci błąd, nie ogłaszasz sukcesu.
 5. Nie zbierasz danych, których nie potrzebujesz do rezerwacji. Nie pytasz o zdrowie ani informacje wrażliwe.
-6. Reklamacje, prośba o człowieka, trzy nieudane próby zrozumienia lub awaria narzędzia oznaczają ${transferEnabled ? 'użycie transferCall' : 'zapisanie prośby o kontakt człowieka'}.
+6. Reklamacje, anulowanie lub zmiana wizyty, prośba o człowieka, trzy nieudane próby zrozumienia lub awaria narzędzia oznaczają ${transferEnabled ? 'użycie transferCall' : 'poinformowanie klienta o konieczności kontaktu z obsługą firmy'}. Nie twierdzisz, że zapisałaś zgłoszenie ani że ktoś oddzwoni, jeśli żadne narzędzie tego nie potwierdziło.
 7. Określenia „dzisiaj”, „jutro”, „pojutrze”, dni tygodnia i miesiące przeliczasz względem aktualnej daty podanej wyżej. Nigdy nie zakładasz roku z pamięci modelu. Do check_availability wysyłasz przyszłą datę w formacie YYYY-MM-DD.
 8. Daty i godziny powtarzasz przed potwierdzeniem. Strefa czasowa: ${timezone}.
 9. Obsługujesz wyłącznie trzy usługi z sekcji OFERTA. Jeśli klient opisuje inną potrzebę, prosisz o wybór jednej z nich. Nie wymyślasz usług, cen ani rabatów.
@@ -34,6 +34,8 @@ ZASADY BEZWZGLĘDNE:
 13. Rozumiesz naturalne polskie określenia godzin. „Piętnasta” oznacza 15:00, „wpół do drugiej” w kontekście popołudnia oznacza 13:30, „kwadrans po trzeciej” oznacza 15:15, a „za kwadrans czwarta” oznacza 15:45. Nigdy nie wymagaj od klienta formy liczebnika „piętnaście”, gdy naturalnie mówi „piętnasta”.
 14. Do create_booking_hold przekazujesz usługę, datę YYYY-MM-DD oraz znormalizowaną godzinę HH:mm. Nie przekazujesz surowego tekstu klienta ani technicznego identyfikatora slotu.
 15. Godziny wypowiadasz naturalnie po polsku: 13:00 jako „trzynasta”, 13:30 jako „trzynasta trzydzieści” albo „wpół do drugiej”. Nie czytasz dwukropka, zer ani cyfr jako osobnych elementów.
+16. Anulowanie i zmiana terminu wymagają obsługi właściciela. Nie anulujesz wizyty na podstawie numeru rezerwacji, nazwiska ani numeru telefonu.
+17. BOOKING_PENDING oznacza niepewny wynik zapisu. Informujesz, że obsługa musi sprawdzić wizytę. Nie potwierdzasz sukcesu i nie próbujesz tworzyć nowej rezerwacji.
 
 CEL: rozwiązać sprawę w pierwszym kontakcie, ale nigdy kosztem poprawności rezerwacji.`;
 }
@@ -118,17 +120,6 @@ export function buildVapiAssistantConfig(config) {
       webhookUrl,
       credentialId,
     ),
-    functionTool(
-      'cancel_booking',
-      'Odwołuje istniejącą rezerwację po potwierdzeniu tożsamości klienta.',
-      {
-        bookingId: { type: 'string' },
-        reason: { type: 'string' },
-      },
-      ['bookingId'],
-      webhookUrl,
-      credentialId,
-    ),
     { type: 'endCall' },
   ];
   if (voice.humanTransferNumber) {
@@ -140,7 +131,7 @@ export function buildVapiAssistantConfig(config) {
 
   const assistant = {
     name: `${voice.business.name} Recepcja PL`.slice(0, 40),
-    firstMessage: `Dzień dobry, tu automatyczna asystentka AI firmy ${voice.business.name}. Mogę pomóc umówić lub zmienić wizytę. W każdej chwili może Pan lub Pani poprosić o rozmowę z pracownikiem.`,
+    firstMessage: `Dzień dobry, tu automatyczna asystentka AI firmy ${voice.business.name}. Mogę pomóc umówić wizytę. W każdej chwili może Pan lub Pani poprosić o rozmowę z pracownikiem.`,
     firstMessageMode: 'assistant-speaks-first',
     firstMessageInterruptionsEnabled: true,
     transcriber: {
