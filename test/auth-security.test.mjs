@@ -38,7 +38,10 @@ function config({ production }) {
 }
 
 test('produkcja wymaga tokenu konfiguracji także za lokalnym reverse proxy', async () => {
-  const auth = createAuthService({ database: fakeDatabase(), config: config({ production: true }) });
+  const auth = createAuthService({
+    database: fakeDatabase(),
+    config: config({ production: true }),
+  });
   const req = request();
 
   const status = await auth.status(req);
@@ -59,7 +62,10 @@ test('produkcja wymaga tokenu konfiguracji także za lokalnym reverse proxy', as
 });
 
 test('lokalny development zachowuje konfigurację bez tokenu', async () => {
-  const auth = createAuthService({ database: fakeDatabase(), config: config({ production: false }) });
+  const auth = createAuthService({
+    database: fakeDatabase(),
+    config: config({ production: false }),
+  });
   const req = request();
 
   const status = await auth.status(req);

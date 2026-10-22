@@ -205,7 +205,11 @@ test('konfiguracja Vapi ujawnia AI i zabezpiecza każdy tool tym samym credentia
   });
   assert.equal(assistant.server.credentialId, 'cred-123');
   const functionTools = assistant.model.tools.filter((tool) => tool.type === 'function');
-  assert.equal(functionTools.length, 5);
+  assert.equal(functionTools.length, 4);
+  assert.equal(
+    functionTools.some((tool) => tool.function.name === 'cancel_booking'),
+    false,
+  );
   assert.ok(functionTools.every((tool) => tool.server.credentialId === 'cred-123'));
   assert.deepEqual(functionTools[0].function.parameters.properties.service.enum, [
     'Konsultacja',

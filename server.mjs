@@ -185,6 +185,11 @@ export async function createApp(options = {}) {
         await authService.requireUser(req);
         return json(res, 200, voiceService.config());
       }
+      if (route === '/api/voice/reconcile' && req.method === 'POST') {
+        await authService.requireUser(req);
+        authService.assertSafeMutation(req);
+        return json(res, 200, await voiceService.reconcileBookings());
+      }
       if (route === '/api/voice/availability' && req.method === 'POST') {
         await authService.requireUser(req);
         authService.assertSafeMutation(req);

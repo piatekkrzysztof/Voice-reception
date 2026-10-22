@@ -139,6 +139,15 @@
           <div class="empty-state" id="bookings-list"><span>00</span><p>Brak rezerwacji. Pierwsza potwierdzona wizyta pojawi się tutaj.</p></div>
         </section>
 
+        <section class="panel data-panel" id="recovery" hidden>
+          <header class="panel-head">
+            <div><p class="eyebrow">KONTROLA KALENDARZA</p><h2>Rezerwacje do sprawdzenia</h2></div>
+            <button class="text-button" id="reconcile-button" type="button">SPRAWDŹ CAL.COM</button>
+          </header>
+          <p>Wynik zapisu jest niepewny. Terminy pozostają zablokowane do wyjaśnienia. Nie twórz ponownie tych wizyt.</p>
+          <div id="pending-list"></div>
+        </section>
+
         <section class="panel data-panel" id="calls">
           <header class="panel-head">
             <div><p class="eyebrow">CALL JOURNAL</p><h2>Ostatnie rozmowy</h2></div>

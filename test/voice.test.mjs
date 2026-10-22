@@ -74,6 +74,25 @@ test('readiness potwierdza dostęp do aktywnej bazy danych', async () => {
   assert.equal(body.database, 'sqlite');
 });
 
+test('uzgadnianie rezerwacji wymaga sesji właściciela i blokuje obce źródło', async () => {
+  assert.equal(
+    (await request('/api/voice/reconcile', { method: 'POST' }, false)).response.status,
+    401,
+  );
+  assert.equal(
+    (
+      await request('/api/voice/reconcile', {
+        method: 'POST',
+        headers: { origin: 'https://evil.example' },
+      })
+    ).response.status,
+    403,
+  );
+  const result = await request('/api/voice/reconcile', { method: 'POST' });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(result.body, { recovered: 0, pending: 0, released: 0 });
+});
+
 test('metryki operacyjne wymagają sesji i zwracają identyfikowalne żądania', async () => {
   const unauthenticated = await request('/api/ops/metrics', {}, false);
   assert.equal(unauthenticated.response.status, 401);

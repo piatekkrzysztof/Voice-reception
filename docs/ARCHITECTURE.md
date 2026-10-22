@@ -11,7 +11,7 @@ Tool Gateway
   ├── check_availability
   ├── create_booking_hold
   ├── confirm_booking
-  └── cancel_booking
+  └── validate_phone_number (anulowanie tylko w panelu właściciela)
   ↓
 Booking Service
   ├── SQLite (dev) / PostgreSQL (deploy): transakcja, TTL, idempotency, unique slot
@@ -34,9 +34,12 @@ Automatyzacje asynchroniczne i CRM nie powinny znajdować się w krytycznej ści
 - aktywny termin ma unikalność wymuszoną w bazie,
 - ponowione potwierdzenie z tym samym kluczem nie tworzy duplikatu,
 - błąd dostawcy kończy się bez deklarowania sukcesu,
-- po błędzie lokalnej finalizacji booking dostawcy jest kompensacyjnie anulowany,
+- po niepewnym wyniku zapisu lub błędzie lokalnej finalizacji dziennik potwierdzenia zachowuje blokadę, a worker uzgadnia wynik z Cal.com bez ponawiania POST,
 - raport rozmowy nie zawiera w aplikacji audio ani pełnej transkrypcji,
-- migracje PostgreSQL są wykonywane pod blokadą advisory, a równoległe próby holdu tego samego terminu są serializowane transakcyjnie.
+- migracje PostgreSQL są wykonywane pod blokadą advisory, a równoległe próby holdów wszystkich usług jednej osoby są serializowane transakcyjnie.
+
+Szczegóły odzyskiwania i ograniczenia: [PILOT_HARDENING.md](PILOT_HARDENING.md).
+
 - `PILOT_MODE` nie pozwala wystartować prawdziwego pilota z atrapą providera, wyłączoną retencją lub bez HTTPS dla alertów.
 
 ## Infrastruktura

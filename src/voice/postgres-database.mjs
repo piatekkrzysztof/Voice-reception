@@ -50,6 +50,25 @@ async function migrate(pool) {
         throw error;
       }
     }
+    const recoveryApplied = await client.query(
+      'SELECT 1 FROM voice_schema_migrations WHERE version = 2',
+    );
+    if (!recoveryApplied.rowCount) {
+      await client.query('BEGIN');
+      try {
+        await client.query(
+          await readFile(
+            new URL('../../migrations/002_booking_recovery.sql', import.meta.url),
+            'utf8',
+          ),
+        );
+        await client.query('INSERT INTO voice_schema_migrations (version) VALUES (2)');
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      }
+    }
   } finally {
     await client
       .query("SELECT pg_advisory_unlock(hashtext('voice-reception:migrations'))")
@@ -81,6 +100,8 @@ function mapHold(row) {
         providerReservationUid: row.provider_reservation_uid,
         expiresAt: iso(row.expires_at),
         createdAt: iso(row.created_at),
+        confirmationJson: row.confirmation_json,
+        providerBookingUid: row.provider_booking_uid,
       }
     : null;
 }
@@ -155,7 +176,7 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
   async function expireHolds(now = new Date().toISOString(), client = pool) {
     const result = await client.query(
       `UPDATE voice_holds SET status = 'expired'
-      WHERE status IN ('active','confirming') AND expires_at <= $1`,
+      WHERE (status = 'active' OR (status = 'confirming' AND confirmation_json IS NULL)) AND expires_at <= $1`,
       [now],
     );
     return result.rowCount;
@@ -181,21 +202,18 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
     }
   }
 
-  async function slotIsFree(
-    { tenantId: currentTenant = tenantId, serviceId, startAt, endAt },
-    client = pool,
-  ) {
+  async function slotIsFree({ tenantId: currentTenant = tenantId, startAt, endAt }, client = pool) {
     await expireHolds(new Date().toISOString(), client);
     const result = await client.query(
       `SELECT EXISTS (
-      SELECT 1 FROM voice_bookings WHERE tenant_id = $1 AND service_id = $2 AND status = 'confirmed'
-        AND start_at < $4 AND end_at > $3
+      SELECT 1 FROM voice_bookings WHERE tenant_id = $1 AND status = 'confirmed'
+        AND start_at < $3 AND end_at > $2
       UNION ALL
-      SELECT 1 FROM voice_holds WHERE tenant_id = $1 AND service_id = $2
-        AND status IN ('active','confirming') AND expires_at > NOW()
-        AND start_at < $4 AND end_at > $3
+      SELECT 1 FROM voice_holds WHERE tenant_id = $1
+        AND (status = 'confirming' OR (status = 'active' AND expires_at > NOW()))
+        AND start_at < $3 AND end_at > $2
     ) AS occupied`,
-      [currentTenant, serviceId, startAt, endAt],
+      [currentTenant, startAt, endAt],
     );
     return !result.rows[0].occupied;
   }
@@ -210,7 +228,7 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
   }) {
     return transaction(pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        `${currentTenant}:${serviceId}:${startAt.slice(0, 10)}`,
+        `resource:${currentTenant}`,
       ]);
       if (!(await slotIsFree({ tenantId: currentTenant, serviceId, startAt, endAt }, client))) {
         const error = new Error('Termin nie jest już dostępny.');
@@ -258,14 +276,14 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
     return mapHold(result.rows[0]);
   }
 
-  async function claimHold(holdId, currentTenant = tenantId) {
+  async function claimHold(holdId, currentTenant = tenantId, confirmation = null) {
     return transaction(pool, async (client) => {
       await expireHolds(new Date().toISOString(), client);
       const result = await client.query(
-        `UPDATE voice_holds SET status = 'confirming'
+        `UPDATE voice_holds SET status = 'confirming', confirmation_json = $3
         WHERE id = $1 AND tenant_id = $2 AND status = 'active' AND expires_at > NOW()
         RETURNING *`,
-        [holdId, currentTenant],
+        [holdId, currentTenant, confirmation ? JSON.stringify(confirmation) : null],
       );
       if (!result.rowCount) {
         const error = new Error('Rezerwacja tymczasowa wygasła lub została wykorzystana.');
@@ -280,7 +298,8 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
   async function releaseClaim(holdId) {
     await pool.query(
       `UPDATE voice_holds
-      SET status = CASE WHEN expires_at > NOW() THEN 'active' ELSE 'expired' END
+      SET status = CASE WHEN expires_at > NOW() THEN 'active' ELSE 'expired' END,
+          confirmation_json = NULL, provider_booking_uid = NULL
       WHERE id = $1 AND status = 'confirming'`,
       [holdId],
     );
@@ -294,6 +313,34 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
       [idempotencyKey],
     );
     return mapBooking(result.rows[0]);
+  }
+
+  async function findBooking({ bookingId = '', holdId = '' }, currentTenant = tenantId) {
+    const result = await pool.query(
+      `SELECT b.*, s.name AS service_name, s.duration_minutes
+      FROM voice_bookings b JOIN voice_services s ON s.id = b.service_id AND s.tenant_id = b.tenant_id
+      WHERE b.tenant_id = $1 AND (b.id = $2 OR b.provider_uid = $2 OR b.hold_id = $3)`,
+      [currentTenant, bookingId, holdId],
+    );
+    return mapBooking(result.rows[0]);
+  }
+
+  async function pendingConfirmations(currentTenant = tenantId) {
+    const result = await pool.query(
+      `SELECT * FROM voice_holds
+      WHERE tenant_id = $1 AND status = 'confirming' AND confirmation_json IS NOT NULL
+      ORDER BY created_at LIMIT 100`,
+      [currentTenant],
+    );
+    return result.rows.map(mapHold);
+  }
+
+  async function saveProviderBooking(holdId, uid, currentTenant = tenantId) {
+    await pool.query(
+      `UPDATE voice_holds SET provider_booking_uid = $1
+      WHERE id = $2 AND tenant_id = $3 AND status = 'confirming'`,
+      [uid, holdId, currentTenant],
+    );
   }
 
   async function confirmHold({ hold, customerName, phone, email, providerUid, idempotencyKey }) {
@@ -343,7 +390,10 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
         }
         throw cause;
       }
-      await client.query("UPDATE voice_holds SET status = 'confirmed' WHERE id = $1", [hold.id]);
+      await client.query(
+        "UPDATE voice_holds SET status = 'confirmed', confirmation_json = NULL, provider_booking_uid = NULL WHERE id = $1",
+        [hold.id],
+      );
       return findBookingByIdempotency(idempotencyKey, client);
     });
   }
@@ -636,6 +686,9 @@ export async function createPostgresDatabase({ config, tenantId, seedCalls = [] 
     claimHold,
     releaseClaim,
     findBookingByIdempotency,
+    findBooking,
+    pendingConfirmations,
+    saveProviderBooking,
     confirmHold,
     listBookings,
     cancelBooking,
